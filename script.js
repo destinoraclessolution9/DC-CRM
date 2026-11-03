@@ -999,6 +999,30 @@ const appLogic = (() => {
     };
     Object.assign(window._crmUtils, { filterTeamBirthdays });
 
+    // Team-birthday rows from the server (my_team_birthdays RPC, 2026-11-03):
+    // the filterTeamBirthdays rule applied in the database, returning only
+    // id / full_name / birthday_md ('MM-DD') / role / team / phone — so no
+    // colleague's IC number or full DOB reaches this browser. Resolves to the
+    // rows, or null when the read failed (show none, never cache a failure).
+    // Every surface on the page (calendar, phone Home, the notification bell)
+    // shares one call per viewer per 5 minutes.
+    let _teamBdayMemo = null; // { uid, at, promise }
+    const fetchTeamBirthdays = (force = false) => {
+        const uid = (_currentUser || window._appState?.cu)?.id;
+        if (uid == null) return Promise.resolve(null);
+        const m = _teamBdayMemo;
+        if (!force && m && m.uid === uid && Date.now() - m.at < 5 * 60 * 1000) return m.promise;
+        const sb = window.supabase || window.supabaseClient;
+        if (!sb || typeof sb.rpc !== 'function') return Promise.resolve(null);
+        const promise = Promise.resolve(sb.rpc('my_team_birthdays'))
+            .then(({ data, error }) => (error || !Array.isArray(data)) ? null : data)
+            .catch(() => null)
+            .then(rows => { if (rows === null && _teamBdayMemo?.promise === promise) _teamBdayMemo = null; return rows; });
+        _teamBdayMemo = { uid, at: Date.now(), promise };
+        return promise;
+    };
+    Object.assign(window._crmUtils, { fetchTeamBirthdays });
+
     // ── Multi-country (MY / SG / AU + future) ────────────────────────────────
     // One org, country-tagged records. The registry lives in UI.countries; these
     // helpers are the shared home for "which market does this record belong to"
@@ -3196,6 +3220,29 @@ function _wireLoginBtn() {
             try { localStorage.removeItem('_prospect_cols_purge_2026_07_29'); } catch (_) { /* superseded key — best-effort cleanup */ }
             localStorage.setItem('_prospect_cols_purge_2026_07_29b', '1');
             console.info('[init] one-shot prospects snapshot purge applied (2026-07-29b)');
+        }
+    } catch (_) { /* best-effort hygiene */ }
+
+    // One-shot staff-PII purge (2026-11-03). Team Birthdays now come from the
+    // my_team_birthdays RPC (name + MM-DD only) and the users list no longer
+    // selects date_of_birth, but devices still hold the old copies: the users
+    // snapshot (every colleague's full DOB — delta-sync would never drop the
+    // key from unchanged rows), the phone Home users cache and the phone
+    // Calendar staff cache (DOB + IC number). Drop them once per device.
+    try {
+        if (!localStorage.getItem('_staff_pii_purge_2026_11_03')) {
+            Object.keys(localStorage)
+                .filter(k => k === 'fs_crm_users' || k === 'fs_crm_users_last_sync'
+                    || /^mhome-users-v[12]-/.test(k) || /^mcal-staff-v[12]$/.test(k))
+                .forEach(k => { try { localStorage.removeItem(k); } catch (_) { /* per-key best-effort */ } });
+            try { window.AppDataStore?.invalidateCache?.('users'); } catch (_) { /* in-memory copy — best-effort */ }
+            if (typeof caches !== 'undefined') {
+                caches.open('crm-data-v1')
+                    .then(c => c.delete('/crm-data/fs_crm_users'))
+                    .catch(() => { /* overflow tier absent — nothing to purge */ });
+            }
+            localStorage.setItem('_staff_pii_purge_2026_11_03', '1');
+            console.info('[init] one-shot staff PII cache purge applied (2026-11-03)');
         }
     } catch (_) { /* best-effort hygiene */ }
 

@@ -32,20 +32,16 @@
     // Local (MYT) date YYYY-MM-DD — toISOString() is UTC and records the previous
     // day for actions taken before 08:00 local.
     const _mLocalDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
-    // Team-birthday MM-DD for a staff/user record: prefer an explicit
-    // date_of_birth (YYYY-MM-DD), else derive from the Malaysian IC number
-    // (first 6 digits = YYMMDD). Birth year is irrelevant for a birthday match,
-    // so we only ever return MM-DD. Foreign / non-IC ids fail the range check
-    // and return '' (skipped). Mirrors getStaffMMDD in script-calendar.js.
+    // Birthday MM-DD for a row in the birthday lists. Colleagues (rows from the
+    // my_team_birthdays RPC) carry birthday_md, worked out in the database from
+    // date_of_birth or the IC's YYMMDD — the year and the IC never reach the
+    // phone. Clients carry their own date_of_birth (YYYY-MM-DD). '' = skipped.
+    // Mirrors getStaffMMDD in script-calendar.js.
     const _staffMD = (u) => {
+        if (u && /^\d{2}-\d{2}$/.test(String(u.birthday_md || ''))) return u.birthday_md;
         const dob = u && u.date_of_birth || '';
         if (typeof dob === 'string' && dob.length >= 7 && dob[4] === '-') return dob.slice(5, 10);
-        const digits = String((u && u.ic_number) || '').replace(/[^0-9]/g, '');
-        if (digits.length < 6) return '';
-        const mm = digits.substring(2, 4), dd = digits.substring(4, 6);
-        const mi = parseInt(mm, 10), di = parseInt(dd, 10);
-        if (!(mi >= 1 && mi <= 12 && di >= 1 && di <= 31)) return '';
-        return `${mm}-${dd}`;
+        return '';
     };
     // Collapse duplicate staff accounts (same person across multiple user rows)
     // so a colleague's Team Birthday shows once. Keyed by name + birthday MM-DD;
@@ -960,15 +956,20 @@
 
         const _mhomeDraftsKey     = 'mhome-drafts-v1-' + _mhomeUid;
         const _mhomeRefillsKey    = 'mhome-refills-v1-' + _mhomeUid;
-        const _mhomeUsersKey      = 'mhome-users-v2-' + _mhomeUid; // v2: + ic_number,status for Team Birthdays (IC-derived DOB)
+        // v3: no date_of_birth / ic_number / phone — colleague birthdays come
+        // from the my_team_birthdays RPC (cachedTeamBdays) instead.
+        const _mhomeUsersKey      = 'mhome-users-v3-' + _mhomeUid;
+        const _mhomeTeamBdayKey   = 'mhome-teambday-v1-' + _mhomeUid;
         const _mhomeCustomersKey  = 'mhome-customers-v1-' + _mhomeUid;
         let cachedDrafts     = _mhomeForce ? null : _mhomeLsGet(_mhomeDraftsKey,     5 * 60 * 1000);
         let cachedRefills    = _mhomeForce ? null : _mhomeLsGet(_mhomeRefillsKey,    5 * 60 * 1000);
         let cachedUsers      = _mhomeForce ? null : _mhomeLsGet(_mhomeUsersKey,      8 * 60 * 60 * 1000);
+        let cachedTeamBdays  = _mhomeForce ? null : _mhomeLsGet(_mhomeTeamBdayKey,   8 * 60 * 60 * 1000);
         let cachedCustomers  = _mhomeForce ? null : _mhomeLsGet(_mhomeCustomersKey,  8 * 60 * 60 * 1000);
         const _needDrafts    = !cachedDrafts;
         const _needRefills   = !cachedRefills;
         const _needUsers     = !cachedUsers;
+        const _needTeamBdays = !cachedTeamBdays;
 
         // ── Mobile Home Tier 1.1: foreground = TODAY only ────────
         // The cold foreground used to await activities + drafts + refills
@@ -1007,17 +1008,24 @@
         }
         if (_needUsers) {
             // Trimmed select: only the columns this view actually reads
-            // (full_name + dob for birthdays, role for "Agent" tag,
-            // reporting_to + team_id for the visibleIds traversal that runs
-            // on the next admin/lead navigation). 50× smaller payload than
-            // getAll('users') on a wide users schema.
+            // (full_name for agent labels, role, reporting_to + team_id for the
+            // visibleIds traversal that runs on the next admin/lead navigation).
+            // Never a colleague's DOB / IC — birthdays are cachedTeamBdays below.
             AppDataStore.queryAdvanced('users', {
-                select: 'id,full_name,date_of_birth,ic_number,role,reporting_to,team_id,phone,status',
+                select: 'id,full_name,role,reporting_to,team_id,status',
                 limit: 50000,
                 countMode: null,
             }).then(r => r?.data || [])
               .then(rows => { cachedUsers = rows; _mhomeLsSet(_mhomeUsersKey, cachedUsers); _mhomePerf('bg:users:done'); _mhomeRepaint(); })
               .catch(() => {});
+        }
+        if (_needTeamBdays) {
+            // Colleague birthdays the viewer may see (upline chain + seniors
+            // already hidden by the server), name + MM-DD only. Per-viewer key;
+            // a failed read is not cached so the next load tries again.
+            _utils.fetchTeamBirthdays(_mhomeForce)
+                .then(rows => { if (!rows) return; cachedTeamBdays = rows; _mhomeLsSet(_mhomeTeamBdayKey, rows); _mhomeRepaint(); })
+                .catch(() => {});
         }
         // ── Today redesign (2026-10-26): goal line, "Do today", tomorrow ──
         // Same progressive pattern: cached (short TTL) → paint → refresh → repaint.
@@ -1053,6 +1061,7 @@
         cachedDrafts  = cachedDrafts  || [];
         cachedRefills = cachedRefills || [];
         cachedUsers   = cachedUsers   || [];
+        cachedTeamBdays = cachedTeamBdays || [];
 
         // ── Cadence generator on mobile (parity with the desktop calendar) ───────────────
         // The grade-driven follow-up dispatchers live in the calendar chunk and historically
@@ -1100,8 +1109,9 @@
             : cachedDrafts.filter(d => d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d));
         // RBAC: client (prospect/customer) birthdays are scoped to the viewer's
         // visible agent set so agents don't see other agents' clients; colleague
-        // (cachedUsers) birthdays show peers + downline but never the viewer's
-        // upline chain or anyone more senior (_utils.filterTeamBirthdays).
+        // (cachedTeamBdays, from the my_team_birthdays RPC) birthdays show peers +
+        // downline but never the viewer's upline chain or anyone more senior —
+        // the server applies that rule, _utils.filterTeamBirthdays repeats it.
         const _bdayOwnerVisible = (ownerId) => {
             if (visibleIds === 'all') return true;
             if (!ownerId) return false;
@@ -1113,9 +1123,9 @@
             const md = dob.slice(5, 10);
             return md === todayMD || md === tomMD;
         };
-        // Staff matcher derives MM-DD from IC when date_of_birth is absent, and
+        // Staff matcher reads the server's birthday_md (see _staffMD), and
         // excludes inactive/expired staff + L13 customer / L14 referrer accounts
-        // that also live in the users table.
+        // that also live in the users table (the server drops them too).
         const _isStaffUser = (u) => {
             const st = String(u.status || '').toLowerCase();
             if (st === 'inactive' || st === 'expired') return false;
@@ -1125,7 +1135,7 @@
         const _staffBdayMatch = (u) => { const md = _staffMD(u); return !!md && (md === todayMD || md === tomMD); };
         const birthdays = [
             ..._dedupClientByBday(allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id))),
-            ..._dedupStaffByBday(_utils.filterTeamBirthdays(_state.cu, cachedUsers.filter(_isStaffUser), cachedUsers)).filter(_staffBdayMatch),
+            ..._dedupStaffByBday(_utils.filterTeamBirthdays(_state.cu, cachedTeamBdays.filter(_isStaffUser), cachedTeamBdays)).filter(_staffBdayMatch),
         ];
         // Stash for mhomeBirthdayWa (id-only onclick) + warm the poster blobs so
         // the clipboard copy has bytes ready by tap time — the calendar warms
@@ -1244,8 +1254,8 @@
                 const md = dob.slice(5, 10);
                 return md === todayMD || md === tomMD;
             };
-            // Staff matcher: IC-derived MM-DD fallback + exclude inactive/expired
-            // and L13 customer / L14 referrer accounts (see _composeBody).
+            // Staff matcher: server birthday_md + exclude inactive/expired and
+            // L13 customer / L14 referrer accounts (see _composeBody).
             const _isStaffUser = (u) => {
                 const st = String(u.status || '').toLowerCase();
                 if (st === 'inactive' || st === 'expired') return false;
@@ -1255,7 +1265,7 @@
             const _staffBdayMatch = (u) => { const md = _staffMD(u); return !!md && (md === todayMD || md === tomMD); };
             const birthdays = [
                 ..._dedupClientByBday(allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id))),
-                ..._dedupStaffByBday(_utils.filterTeamBirthdays(_state.cu, cachedUsers.filter(_isStaffUser), cachedUsers)).filter(_staffBdayMatch),
+                ..._dedupStaffByBday(_utils.filterTeamBirthdays(_state.cu, cachedTeamBdays.filter(_isStaffUser), cachedTeamBdays)).filter(_staffBdayMatch),
             ];
             // Parity with _composeBody: stash for mhomeBirthdayWa + warm posters.
             _mhomeBdayList = birthdays;
@@ -1729,8 +1739,8 @@
     // birthday card in the day sheet. Held in memory only (never persisted) so
     // agent names can't leak across logins on a shared device.
     let _mcalUserMap = new Map();
-    // Staff/colleague records (id, full_name, ic_number, date_of_birth, role,
-    // team, phone) for the Team Birthday markers on the month grid + day sheet.
+    // Staff/colleague records (id, full_name, birthday_md, role, team, phone —
+    // my_team_birthdays RPC) for the Team Birthday markers on the month grid + day sheet.
     // Held in memory; the WA button reads it live when a birthday card is tapped.
     let _mcalStaffList = [];
     // Pre-warmed birthday-poster image blobs, keyed by gender. The poster URLs
@@ -2622,14 +2632,15 @@
 
         // Team Birthdays: staff/colleague records for the month-grid markers +
         // day-sheet cards. Peers + downline are visible; the viewer's upline
-        // chain and anyone more senior are hidden (_utils.filterTeamBirthdays).
-        // Excludes inactive/expired staff + L13 customer / L14 referrer accounts.
-        // Birthday MM-DD comes from date_of_birth or, failing that, the IC number
-        // (see _staffMD). Cached so swiping months doesn't refetch.
+        // chain and anyone more senior are hidden. Rows come from the
+        // my_team_birthdays RPC, which applies that rule in the database, drops
+        // inactive/expired staff + L13 customer / L14 referrer accounts, and sends
+        // name + birthday_md only (see _staffMD). Cached so swiping months
+        // doesn't refetch.
         {
-            // v2: + reporting_to. The cache is per DEVICE, so it holds the
-            // unfiltered staff rows and the per-viewer filter runs on every render.
-            const _STAFF_KEY = 'mcal-staff-v2';
+            // Per VIEWER: the server already filtered these rows for this login,
+            // so a shared device must never show them to the next person.
+            const _STAFF_KEY = 'mcal-teambday-v1-' + (_state.cu?.id ?? 'anon');
             const _isStaffUser = (u) => {
                 const st = String(u.status || '').toLowerCase();
                 if (st === 'inactive' || st === 'expired') return false;
@@ -2642,16 +2653,11 @@
                 _mcalStaffList = _staffForViewer(_cachedStaff);
             } else {
                 _mcalStaffList = []; // never carry a previous viewer's list while refetching
-                AppDataStore.queryAdvanced('users', { select: 'id,full_name,date_of_birth,ic_number,role,team,phone,status,reporting_to', limit: 50000, countMode: null })
-                    .then(r => r?.data || [])
+                _utils.fetchTeamBirthdays()
                     .then(rows => {
-                        // Staff-band rows only (no L13/L14). Inactive staff are never
-                        // shown, only walked through for the upline chain — keep just
-                        // the chain fields so their DOB/IC isn't cached on the device.
-                        const raw = (rows || []).filter(u => { const l = getUserLevel(u); return l <= 12 || l === 15; })
-                            .map(u => _isStaffUser(u) ? u : { id: u.id, full_name: u.full_name, role: u.role, status: u.status, reporting_to: u.reporting_to });
-                        _mcalStaffList = _staffForViewer(raw);
-                        _lsSet(_STAFF_KEY, raw);
+                        if (!rows) return; // failed read: show none, don't cache, retry next load
+                        _mcalStaffList = _staffForViewer(rows);
+                        _lsSet(_STAFF_KEY, rows);
                         // Re-render so staff markers appear once the list lands (guarded
                         // to the still-current month, mirrors the people refetch above).
                         const vp = document.getElementById('content-viewport');
@@ -2757,8 +2763,8 @@
             if (!byDate.has(k)) byDate.set(k, []);
             byDate.get(k).push({ activity_type: 'All Day Birthday', _isBirthday: true, _person: p });
         }
-        // Team Birthdays: inject staff markers (team-wide, no owner check). MM-DD
-        // from date_of_birth or IC (_staffMD).
+        // Team Birthdays: inject staff markers (team rule applied by the server,
+        // no owner check). MM-DD = the RPC's birthday_md (_staffMD).
         for (const s of _mcalStaffList) {
             const md = _staffMD(s);
             if (!md) continue;

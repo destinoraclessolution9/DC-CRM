@@ -65,11 +65,25 @@ const _scopeRefillReminders = (reminders, visibleIds, prospectMap, customerMap) 
     });
 };
 // Scope birthday people (prospects + customers) to the current user's visible agents.
-// Agents stay unscoped (org-wide agent birthdays are not PII-sensitive customer data).
+// Colleagues follow the team rule instead (_teamBdaysDue).
 const _isVisibleBirthdayPerson = (p, visibleIds, vStrs) => {
     if (visibleIds === 'all') return true;
     const agentId = p.responsible_agent_id || p.lead_agent_id;
     return !!agentId && vStrs.includes(String(agentId));
+};
+// Colleague birthdays due today / tomorrow, from my_team_birthdays rows (the
+// server already hid the viewer's upline chain + seniors; filterTeamBirthdays
+// repeats the rule). One entry per person: duplicate accounts share name + MM-DD.
+const _teamBdaysDue = (rows, todayMD, tomMD) => {
+    const seen = new Set();
+    return _utils.filterTeamBirthdays(_state.cu, rows || [], rows || []).filter(u => {
+        const md = String(u.birthday_md || '');
+        if (md !== todayMD && md !== tomMD) return false;
+        const key = `${String(u.full_name || '').trim().toLowerCase()}|${md}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
 };
 
 // ── Notification inbox (notification_outbox) ──────────────────────────────
@@ -249,8 +263,10 @@ const _refreshNotifBadge = async () => {
         const todayMD = mmdd(today);
         const tom = new Date(today); tom.setDate(tom.getDate()+1);
         const tomMD = mmdd(tom);
-        const [allProspects, allCustomers, allUsers] = await Promise.all([
-            AppDataStore.getAll('prospects'), AppDataStore.getAll('customers'), AppDataStore.getAll('users')
+        // Colleagues: my_team_birthdays RPC (upline chain + seniors hidden by the
+        // server, name + MM-DD only) — never every user's date_of_birth.
+        const [allProspects, allCustomers, teamBdays] = await Promise.all([
+            AppDataStore.getAll('prospects'), AppDataStore.getAll('customers'), _utils.fetchTeamBirthdays().then(r => r || [])
         ]);
         const vStrs = visibleIds === 'all' ? null : visibleIds.map(String);
         const prospectMap = new Map((allProspects || []).map(p => [String(p.id), p]));
@@ -261,7 +277,7 @@ const _refreshNotifBadge = async () => {
             const md = dob.slice(5, 10); // MM-DD
             return md === todayMD || md === tomMD;
         };
-        // Client birthdays are owner-scoped; agent birthdays remain org-wide.
+        // Client birthdays are owner-scoped; colleague birthdays follow the team rule.
         // Dedupe across the intentional dual prospect+customer record for the same person
         // (same full_name + date_of_birth) so converted customers aren't counted twice.
         const _bdayCountSeen = new Set();
@@ -273,7 +289,7 @@ const _refreshNotifBadge = async () => {
                 _bdayCountSeen.add(key);
                 return true;
             });
-        const bdayAgents = allUsers.filter(hasBday);
+        const bdayAgents = _teamBdaysDue(teamBdays, todayMD, tomMD);
         count += bdayClients.length + bdayAgents.length;
 
         // Pending refill reminders — scoped to the current user's visible agents
@@ -335,8 +351,8 @@ const _buildNotifPanel = async () => {
     }
 
     // Birthdays
-    const [allProspects, allCustomers, allUsers] = await Promise.all([
-        AppDataStore.getAll('prospects'), AppDataStore.getAll('customers'), AppDataStore.getAll('users')
+    const [allProspects, allCustomers, teamBdays] = await Promise.all([
+        AppDataStore.getAll('prospects'), AppDataStore.getAll('customers'), _utils.fetchTeamBirthdays().then(r => r || [])
     ]);
     const vStrs = visibleIds === 'all' ? null : visibleIds.map(String);
     const prospectMap = new Map((allProspects || []).map(p => [String(p.id), p]));
@@ -359,14 +375,8 @@ const _buildNotifPanel = async () => {
         bdayClientSet.add(key);
         items.push({ icon: '🎂', title: `${esc(p.full_name || 'Someone')}'s Birthday`, sub: isToday ? 'Today!' : 'Tomorrow' });
     });
-    allUsers.forEach(u => {
-        const dob = u.date_of_birth || '';
-        if (!dob || dob.length < 5) return;
-        const md = dob.slice(5, 10);
-        const isToday = md === todayMD;
-        const isTom   = md === tomMD;
-        if (!isToday && !isTom) return;
-        items.push({ icon: '🎂', title: `${esc(u.full_name || 'Agent')}'s Birthday`, sub: (isToday ? 'Today!' : 'Tomorrow') + ' · Agent' });
+    _teamBdaysDue(teamBdays, todayMD, tomMD).forEach(u => {
+        items.push({ icon: '🎂', title: `${esc(u.full_name || 'Agent')}'s Birthday`, sub: (u.birthday_md === todayMD ? 'Today!' : 'Tomorrow') + ' · Agent' });
     });
 
     // Refill reminders — scoped to the current user's visible agents

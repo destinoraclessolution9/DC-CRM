@@ -212,7 +212,16 @@ class DataStore {
             // actually renders (Agent ID + Team) and filters on — saveAgent
             // writes both as text, NOT team_id. Omitting them made every row
             // show "N/A" / "Unassigned" regardless of the saved value.
-            users: 'id,full_name,email,phone,role,agent_code,team,status,team_id,reporting_to,date_of_birth,employment_type,daily_must_do,created_at,updated_at',
+            // 2026-11-03: date_of_birth dropped — this list reaches every agent's
+            // browser, and colleague birthdays now come from the my_team_birthdays
+            // RPC (MM-DD only, upline chain + seniors already hidden).
+            users: 'id,full_name,email,phone,role,agent_code,team,status,team_id,reporting_to,employment_type,daily_must_do,created_at,updated_at',
+            // getById('users', id) for ANOTHER staff member on a cache miss:
+            // every column except their IC number, date of birth and bank
+            // details. The viewer's own row still reads '*'; getByIdFull is the
+            // one deliberate full read (the Agent edit form). A new users column
+            // that other people's screens need must be added here too.
+            users_detail: 'id,username,full_name,role,team_id,agent_code,license_start,license_expiry,commission_rate,monthly_target,reporting_to,join_date,probation_end,status,business_address,phone,email,gender,company_name,created_at,updated_at,customer_id,team,nationality,consent_preferences,preferred_name,auth_user_id,role_level,employment_type,country,daily_must_do',
             // Activities: verified against actual DB schema 2026-04-16.
             // Excludes: consultants (JSONB blob), payment detail columns,
             // long discussion_summary field — only needed in detail/edit view.
@@ -608,6 +617,10 @@ class DataStore {
     // Tables subscribed: those added to supabase_realtime publication by
     //   migrations/realtime_publication_2026-05-03.sql        (cps_intake_requests, refill_reminders, activities)
     //   migrations/realtime_publication_extend_2026-05-31.sql (prospects, customers, users)
+    // except users (2026-11-03): a users event carries the FULL row — the
+    // colleague's IC number, date of birth and bank account — to every open
+    // browser, and every Must-Do edit writes one. Staff changes reach other
+    // tabs through the users SWR refresh instead.
     //
     // Idempotent: bails if window.supabase missing or already subscribed.
     // Reconnect: the supabase-js channel handles websocket reconnect itself;
@@ -616,7 +629,7 @@ class DataStore {
     _startRealtimeSWR() {
         if (this._realtimeChannel) return;
         if (!window.supabase || typeof window.supabase.channel !== 'function') return;
-        const TABLES = ['prospects', 'customers', 'users', 'activities', 'cps_intake_requests', 'refill_reminders'];
+        const TABLES = ['prospects', 'customers', 'activities', 'cps_intake_requests', 'refill_reminders'];
         const onChange = (payload) => {
             try {
                 const table = payload?.table;
@@ -2219,9 +2232,10 @@ class DataStore {
         } catch (_) { /* overflow tier miss/unavailable — fall through to network */ }
 
         try {
+            const isOtherUser = tableName === 'users' && String(id) !== String(window._currentUser?.id);
             const { data, error } = await this._readClient()
                 .from(tableName)
-                .select('*')
+                .select(isOtherUser ? this._lightSelects.users_detail : '*')
                 .eq('id', id)
                 .maybeSingle();
             if (error) throw error;

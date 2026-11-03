@@ -3491,14 +3491,15 @@
 
         // Fetch everything in parallel. Individual .catch(() => []) guards
         // ensure a single table failure doesn't prevent glance counts updating.
-        const [prospects, customers, names, allUsers] = await Promise.all([
+        const [prospects, customers, names, allUsers, teamBdayRows] = await Promise.all([
             AppDataStore.getAll('prospects').catch(() => []),
             AppDataStore.getAll('customers').catch(() => []),
             AppDataStore.getAll('names').catch(() => []),
-            // Explicit select — getAll('users') is PII-trimmed and omits ic_number,
-            // which the Team Birthdays IC-derived DOB needs. Mirror the mobile fetch.
-            // reporting_to: Team Birthdays hides the viewer's upline chain.
-            AppDataStore.queryAdvanced('users', { select: 'id,full_name,date_of_birth,ic_number,role,team,status,phone,reporting_to', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []),
+            // Agent names for the client cards only — no colleague DOB / IC here.
+            AppDataStore.queryAdvanced('users', { select: 'id,full_name', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []),
+            // Team Birthdays: the server already hides the viewer's upline chain +
+            // seniors and sends name + MM-DD only (my_team_birthdays RPC).
+            _utils.fetchTeamBirthdays().then(r => r || []),
         ]);
         const all = [...prospects, ...customers];
         const userMap = new Map(allUsers.map(u => [String(u.id), u]));
@@ -3647,27 +3648,17 @@
         // ===== TEAM BIRTHDAYS (staff / colleagues) =====
         // Internal team celebration widget — separate from client birthdays above.
         // Not owner-scoped (peers + downline are visible), but agents never see
-        // their upline chain or anyone more senior (_utils.filterTeamBirthdays).
-        // Excludes customer (L13) / referrer (L14) accounts that also live in the
-        // users table, and inactive/expired staff.
+        // their upline chain or anyone more senior. Rows come from the
+        // my_team_birthdays RPC, which applies that rule in the database and also
+        // drops customer (L13) / referrer (L14) accounts and inactive/expired
+        // staff; the client filters below are the same rules again.
         const teamTodayList = document.getElementById('team-bday-today-list');
         const teamUpcomingList = document.getElementById('team-bday-upcoming-list');
         if (teamTodayList && teamUpcomingList) {
-            // Staff birthday source: prefer an explicit date_of_birth (YYYY-MM-DD);
-            // otherwise derive MM-DD from the Malaysian IC number (first 6 digits =
-            // YYMMDD). The birth YEAR is irrelevant for a birthday match, so we only
-            // ever compare MM-DD — no 19xx/20xx disambiguation needed. Foreign /
-            // non-IC ids fail the MM/DD range check and are simply skipped.
-            const getStaffMMDD = (u) => {
-                const explicit = getMMDD(u.date_of_birth);
-                if (explicit) return explicit;
-                const digits = String(u.ic_number || '').replace(/[^0-9]/g, '');
-                if (digits.length < 6) return '';
-                const mm = digits.substring(2, 4), dd = digits.substring(4, 6);
-                const mi = parseInt(mm, 10), di = parseInt(dd, 10);
-                if (!(mi >= 1 && mi <= 12 && di >= 1 && di <= 31)) return '';
-                return `${mm}-${dd}`;
-            };
+            // Staff birthday: the server's birthday_md ('MM-DD', worked out in the
+            // database from date_of_birth or the IC's YYMMDD). The birth year is
+            // never sent — a birthday match only needs MM-DD.
+            const getStaffMMDD = (u) => (/^\d{2}-\d{2}$/.test(String(u.birthday_md || '')) ? u.birthday_md : '');
 
             const isStaff = (u) => {
                 const status = String(u.status || '').toLowerCase();
@@ -3690,8 +3681,9 @@
             // MM-DD; prefer a row that has a phone (so Send Wish works). Also drops
             // staff with no birthday source (they can never match a day anyway).
             const _staffSeen = new Map();
-            // Hide uplines + seniors BEFORE the dedup, chain walked on the raw list.
-            for (const u of _utils.filterTeamBirthdays(_state.cu, allUsers.filter(isStaff), allUsers)) {
+            // Hide uplines + seniors BEFORE the dedup (the server already did; this
+            // keeps the screen on the same rule if it ever sends more).
+            for (const u of _utils.filterTeamBirthdays(_state.cu, teamBdayRows.filter(isStaff), teamBdayRows)) {
                 const md = getStaffMMDD(u);
                 if (!md) continue;
                 const key = `${String(u.full_name || '').trim().toLowerCase()}|${md}`;
