@@ -336,6 +336,11 @@ async function main() {
         check('phone: no sideways scroll, buttons inside the screen', fit.sw <= fit.w + 1 && fit.acts, fit);
         if (SHOTS) await phone.screenshot({ path: path.join(SHOTS, '8-phone-list.png'), fullPage: false });
 
+        // The team-list phone notice opens ./index.html#name_list — boot only
+        // honours hashes in _KNOWN_VIEWS, so without it the tap lands on Home.
+        const known = /_KNOWN_VIEWS = new Set\(\[([\s\S]*?)\]\)/.exec(fs.readFileSync(path.join(__dirname, '..', 'script.js'), 'utf8'));
+        check('#name_list opens Name List on start-up (notice tap / reload)', !!known && /'name_list'/.test(known[1]));
+
         check('no page errors', pageErrors.length === 0, pageErrors);
     } catch (e) {
         fail++;

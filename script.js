@@ -3506,7 +3506,7 @@ function _wireLoginBtn() {
         // Customer/referrer roles (L13+) always land on fude regardless of hash —
         // they have no access to the operational views.
         const _KNOWN_VIEWS = new Set([
-            'home','calendar','prospects','pipeline','referrals','promotions',
+            'home','calendar','prospects','name_list','pipeline','referrals','promotions',
             'marketing_automation','cases','agents','performance','reports','risk',
             'knowledge','documents','import','integrations','settings','protection',
             'custom_fields','milestones','fude','noticeboard','stock_take',
