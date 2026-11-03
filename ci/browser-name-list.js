@@ -54,7 +54,7 @@ const installFakes = () => {
         counts: { picked: 3, contacted: 1, replied: 1, interested: 1, met: 0, closed: 1, revenue: 3800, closed_after_contact: 1 },
         freq_limit: 2, freq_days: 30,
         rows: [
-            row({ id: 101, name: 'Alice Lee', grp: 'strong', fit: 85, contact_at: '2026-11-02T08:00:00Z', contact_via: 'whatsapp', reply: 'interested', reply_note: 'wants a visit', sale_amount: 3800, sale_date: '2026-11-03', sale_item: 'Power Ring' }),
+            row({ id: 101, name: 'Alice Lee', grp: 'strong', fit: 85, contact_at: '2026-11-02T17:10:00Z', contact_via: 'whatsapp', reply: 'interested', reply_note: 'wants a visit', sale_amount: 3800, sale_date: '2026-11-03', sale_item: 'Power Ring' }),
             row({ id: 102, name: 'Ben Tan', freq: 2, rank: 2 }),
             row({ id: 103, name: 'Cara Dnf', dni: true, rank: 3 }),
             row({ id: 104, name: 'Dan Extra', decision: 'pending', engine_picked: false, rank: 4 }),
@@ -124,6 +124,7 @@ async function main() {
     try {
         const page = await browser.newPage();
         await page.setViewport({ width: 1280, height: 900 });
+        await page.emulateTimezone('Asia/Kuala_Lumpur');
         page.on('pageerror', e => pageErrors.push(e.message));
         await page.setRequestInterception(true);
         page.on('request', r => (/supabase\.co|vercel|posthog|wa\.me/.test(r.url()) ? r.abort() : r.continue()));
@@ -209,7 +210,7 @@ async function main() {
         check('sections: on the list 4 · suggestions 1 · taken off 1', dt.includes('On the list (4)') && dt.includes('More suggestions (1)') && dt.includes('Taken off (1)'));
         const alice = await page.evaluate(() => document.getElementById('nl-row-101')?.innerText || '');
         check('row: reasons, next step, scores', alice.includes('Recent CPS') && alice.includes('Share 风水 Feng Shui') && alice.includes('Fit 85'), alice);
-        check('row: progress — WhatsApp, interested + note, closed RM', alice.includes('💬 WhatsApp 2 Nov') && alice.includes('Interested') && alice.includes('wants a visit') && alice.includes('Closed RM 3,800'), alice);
+        check('row: progress — WhatsApp on the local day, interested + note, closed RM', alice.includes('💬 WhatsApp 3 Nov') && alice.includes('Interested') && alice.includes('wants a visit') && alice.includes('Closed RM 3,800'), alice);
         check('contacted-often warning', (await page.evaluate(() => document.getElementById('nl-row-102')?.innerText || '')).includes('contacted 2× in 30 days'));
         const cara = await page.evaluate(() => ({ t: document.getElementById('nl-row-103')?.innerText || '', btns: [...document.querySelectorAll('#nl-row-103 .inv-acts button')].map(b => b.textContent.trim()) }));
         check('Do not contact: chip, no WhatsApp / Called', cara.t.includes('Do not contact') && !cara.btns.some(b => /WhatsApp|Called/.test(b)), cara);

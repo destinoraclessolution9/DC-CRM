@@ -76,9 +76,20 @@
     };
     const _err = (e) => String(e && e.message ? e.message : e).replace(/^.*?:\s*(?=[A-Z])/, '');
     const _MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    // A timestamp shows the viewer's own day (a plain slice of a UTC time made
+    // a 1 am step read "yesterday"); a bare YYYY-MM-DD date stays as it is.
+    const _ymd = (v) => {
+        if (!v) return '';
+        const s = String(v);
+        if (s.length > 10) {
+            const t = new Date(s);
+            if (!isNaN(t)) return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+        }
+        return s.slice(0, 10);
+    };
     const _d = (v) => {
         if (!v) return '';
-        const s = String(v).slice(0, 10);
+        const s = _ymd(v);
         const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
         return m ? `${Number(m[3])} ${_MON[Number(m[2]) - 1]}` : s;
     };
@@ -479,7 +490,7 @@
         const bits = [];
         if (r.contact_at) bits.push(`${esc(NLP_STEP_LABEL[r.contact_via] || r.contact_via || 'Contacted')} ${esc(_d(r.contact_at))}`);
         if (r.reply) bits.push(`<span class="${r.reply === 'interested' ? 'inv-st-ok' : (r.reply === 'not_interested' || r.reply === 'stop') ? 'inv-st-no' : ''}">${esc(NLP_STEP_LABEL[r.reply] || r.reply)}</span>${r.reply_note ? ` <span class="inv-when">“${esc(r.reply_note)}”</span>` : ''}`);
-        if (r.met_at && (r.met_via !== r.contact_via || r.met_at !== String(r.contact_at || '').slice(0, 10))) bits.push(`${esc(NLP_STEP_LABEL[r.met_via] || '🤝 Met')} ${esc(_d(r.met_at))}`);
+        if (r.met_at && (r.met_via !== r.contact_via || r.met_at !== _ymd(r.contact_at))) bits.push(`${esc(NLP_STEP_LABEL[r.met_via] || '🤝 Met')} ${esc(_d(r.met_at))}`);
         if (r.sale_amount != null) bits.push(`<span class="inv-st-ok">💰 Closed ${_rm(r.sale_amount)}</span>${r.sale_item ? ` <span class="inv-when">${esc(String(r.sale_item).slice(0, 40))}</span>` : ''}`);
         return bits.length ? `<div class="nlp-prog">${bits.join(' · ')}</div>` : '';
     };
@@ -742,7 +753,7 @@
             r.decision === 'selected' ? 'yes' : r.decision === 'removed' ? 'taken off' : 'suggested',
             r.fit ?? '', r.engagement ?? '', r.readiness ?? '',
             (r.reasons || []).map(x => x.t).join('; '), r.next_step || '',
-            r.contact_at ? `${NLP_STEP_LABEL[r.contact_via] || r.contact_via} ${String(r.contact_at).slice(0, 10)}` : '',
+            r.contact_at ? `${NLP_STEP_LABEL[r.contact_via] || r.contact_via} ${_ymd(r.contact_at)}` : '',
             r.reply ? (NLP_STEP_LABEL[r.reply] || r.reply) : '', r.met_at || '', r.sale_amount ?? '',
         ]);
         const csv = '﻿' + [head, ...rows].map(x => x.map(q).join(',')).join('\r\n');
