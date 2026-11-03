@@ -962,6 +962,43 @@ const appLogic = (() => {
     // role-scoped visible user list).
     Object.assign(window._crmUtils, { getVisibleUserIds: (u) => getVisibleUserIds(u) });
 
+    // ── Team-birthday privacy ───────────────────────────────────────────────
+    // Colleague birthdays a viewer may NOT see: everyone up their reporting
+    // chain (reporting_to walked up — same-level uplines included) plus anyone
+    // more senior (smaller level number) in any team or branch. L1/L2 hide
+    // nothing; peers, downline and the viewer's own row stay visible.
+    // `rows` = the staff rows about to be shown; `allUsers` = the full users
+    // list to walk the chain on (pass the raw list when rows were pre-filtered,
+    // so an inactive middle leader doesn't break the walk). A hidden person is
+    // matched by id AND name so their duplicate account can't slip through.
+    // Pure + sync — chunks call _utils.filterTeamBirthdays(_state.cu, rows, all).
+    const filterTeamBirthdays = (viewer, rows, allUsers) => {
+        const list = Array.isArray(rows) ? rows : [];
+        if (!viewer) return [];
+        const vLvl = _getUserLevel(viewer);
+        if (vLvl <= 2) return list;
+        const pool = (Array.isArray(allUsers) && allUsers.length) ? allUsers : list;
+        const byId = new Map(pool.map(u => [String(u.id), u]));
+        const vId = String(viewer.id);
+        const norm = (n) => String(n || '').trim().toLowerCase();
+        const hiddenIds = new Set();
+        const seen = new Set([vId]); // cycle guard (reporting loops)
+        let up = (byId.get(vId) || viewer).reporting_to;
+        while (up != null && up !== '' && !seen.has(String(up))) {
+            seen.add(String(up));
+            hiddenIds.add(String(up));
+            up = byId.get(String(up))?.reporting_to;
+        }
+        for (const u of pool) {
+            if (String(u.id) !== vId && _getUserLevel(u) < vLvl) hiddenIds.add(String(u.id));
+        }
+        const hiddenNames = new Set([...hiddenIds].map(id => norm(byId.get(id)?.full_name)).filter(Boolean));
+        return list.filter(u => String(u.id) === vId || !(
+            hiddenIds.has(String(u.id)) || _getUserLevel(u) < vLvl || hiddenNames.has(norm(u.full_name))
+        ));
+    };
+    Object.assign(window._crmUtils, { filterTeamBirthdays });
+
     // ── Multi-country (MY / SG / AU + future) ────────────────────────────────
     // One org, country-tagged records. The registry lives in UI.countries; these
     // helpers are the shared home for "which market does this record belong to"

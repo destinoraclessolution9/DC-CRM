@@ -125,6 +125,29 @@ function levelOf(u: any): number {
 const isActiveUser = (u: any) => !!u && u.status !== "deleted" && u.status !== "inactive";
 const isRealTeam = (t: unknown) => { const v = String(t ?? "").trim().toLowerCase(); return v !== "" && v !== "unassigned"; };
 
+// Team-birthday privacy (mirror of script.js filterTeamBirthdays): a recipient
+// never gets the birthday of their upline chain (reporting_to walked up, same-
+// level uplines included) or of anyone more senior. L1/L2 hide nothing. Matched
+// by id AND name so a hidden person's duplicate account can't slip through.
+function teamBirthdayHider(viewerId: number, users: Map<number, any>): (u: any) => boolean {
+  const viewer = users.get(viewerId);
+  if (!viewer) return () => true;
+  const vLvl = levelOf(viewer);
+  if (vLvl <= 2) return () => false;
+  const norm = (n: unknown) => String(n ?? "").trim().toLowerCase();
+  const ids = new Set<number>();
+  const seen = new Set<number>([viewerId]); // cycle guard (reporting loops)
+  let up = viewer.reporting_to;
+  while (up != null && up !== "" && !seen.has(Number(up))) {
+    seen.add(Number(up));
+    ids.add(Number(up));
+    up = users.get(Number(up))?.reporting_to;
+  }
+  for (const u of users.values()) if (Number(u.id) !== viewerId && levelOf(u) < vLvl) ids.add(Number(u.id));
+  const names = new Set([...ids].map((id) => norm(users.get(id)?.full_name)).filter(Boolean));
+  return (u: any) => Number(u.id) !== viewerId && (ids.has(Number(u.id)) || levelOf(u) < vLvl || names.has(norm(u.full_name)));
+}
+
 // ---------- Message formatting: "Today 3:00 PM · CPS · Menara Bangkok Bank" ----------
 function mytDateOf(ms: number): string {
   return new Date(ms + MYT_OFFSET_HOURS * 3600_000).toISOString().slice(0, 10);
@@ -308,7 +331,7 @@ Deno.serve(async (req: Request) => {
     return isActiveUser(u) && levelOf(u) <= 12 && (onlyUserId == null || id === onlyUserId);
   };
   try {
-    const users: any[] = await pgSelect("users", "select=id,full_name,role,status,team,date_of_birth");
+    const users: any[] = await pgSelect("users", "select=id,full_name,role,status,team,date_of_birth,reporting_to");
     userMap = new Map(users.map((u: any) => [Number(u.id), u]));
   } catch (e: any) {
     stats.errors.push(`users: ${e?.message || e}`);
@@ -481,7 +504,8 @@ Deno.serve(async (req: Request) => {
 
       // Birthdays. date_of_birth is a DATE column (PostgREST `like` errors on
       // it), so match MM-DD here. Scoped per recipient: own prospects/customers
-      // (responsible agent) and same-team colleagues only — never another team's.
+      // (responsible agent) and same-team colleagues only — never another team's,
+      // and never the recipient's upline chain or anyone more senior.
       const isToday = (dob: unknown) => typeof dob === "string" && dob.slice(5, 10) === todayMMDD;
       const [bdayProspects, bdayCustomers] = await Promise.all([
         pgSelectAll("prospects", "select=id,full_name,date_of_birth,responsible_agent_id&date_of_birth=not.is.null&or=(status.is.null,status.neq.inactive)"),
@@ -522,10 +546,11 @@ Deno.serve(async (req: Request) => {
       for (const userId of recipients) {
         const me = userMap.get(userId);
         const myActs = allTodayActs.filter((a: any) => attendeeIds(a).includes(userId));
+        const hideBday = teamBirthdayHider(userId, userMap);
         const myBirthdays = [
           ...bdayContacts.filter((x: any) => Number(x.responsible_agent_id) === userId).map((x: any) => x.full_name),
           ...bdayAgents
-            .filter((u: any) => Number(u.id) !== userId && isRealTeam(me?.team) && String(u.team ?? "") === String(me?.team ?? ""))
+            .filter((u: any) => Number(u.id) !== userId && isRealTeam(me?.team) && String(u.team ?? "") === String(me?.team ?? "") && !hideBday(u))
             .map((u: any) => `${u.full_name} (Agent)`),
         ];
 

@@ -1100,7 +1100,8 @@
             : cachedDrafts.filter(d => d.status === 'pending' && (d.due_date || '') <= todayStr && _isMine(d));
         // RBAC: client (prospect/customer) birthdays are scoped to the viewer's
         // visible agent set so agents don't see other agents' clients; colleague
-        // (cachedUsers) birthdays stay visible to all as a team feature.
+        // (cachedUsers) birthdays show peers + downline but never the viewer's
+        // upline chain or anyone more senior (_utils.filterTeamBirthdays).
         const _bdayOwnerVisible = (ownerId) => {
             if (visibleIds === 'all') return true;
             if (!ownerId) return false;
@@ -1124,7 +1125,7 @@
         const _staffBdayMatch = (u) => { const md = _staffMD(u); return !!md && (md === todayMD || md === tomMD); };
         const birthdays = [
             ..._dedupClientByBday(allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id))),
-            ..._dedupStaffByBday(cachedUsers.filter(_isStaffUser)).filter(_staffBdayMatch),
+            ..._dedupStaffByBday(_utils.filterTeamBirthdays(_state.cu, cachedUsers.filter(_isStaffUser), cachedUsers)).filter(_staffBdayMatch),
         ];
         // Stash for mhomeBirthdayWa (id-only onclick) + warm the poster blobs so
         // the clipboard copy has bytes ready by tap time — the calendar warms
@@ -1254,7 +1255,7 @@
             const _staffBdayMatch = (u) => { const md = _staffMD(u); return !!md && (md === todayMD || md === tomMD); };
             const birthdays = [
                 ..._dedupClientByBday(allPeople.filter(p => _bdayMatch(p) && _bdayOwnerVisible(p.responsible_agent_id || p.lead_agent_id))),
-                ..._dedupStaffByBday(cachedUsers.filter(_isStaffUser)).filter(_staffBdayMatch),
+                ..._dedupStaffByBday(_utils.filterTeamBirthdays(_state.cu, cachedUsers.filter(_isStaffUser), cachedUsers)).filter(_staffBdayMatch),
             ];
             // Parity with _composeBody: stash for mhomeBirthdayWa + warm posters.
             _mhomeBdayList = birthdays;
@@ -2620,27 +2621,37 @@
         }
 
         // Team Birthdays: staff/colleague records for the month-grid markers +
-        // day-sheet cards. Visible to ALL staff (team feature, not RBAC-scoped),
-        // excludes inactive/expired staff + L13 customer / L14 referrer accounts.
+        // day-sheet cards. Peers + downline are visible; the viewer's upline
+        // chain and anyone more senior are hidden (_utils.filterTeamBirthdays).
+        // Excludes inactive/expired staff + L13 customer / L14 referrer accounts.
         // Birthday MM-DD comes from date_of_birth or, failing that, the IC number
         // (see _staffMD). Cached so swiping months doesn't refetch.
         {
-            const _STAFF_KEY = 'mcal-staff-v1';
+            // v2: + reporting_to. The cache is per DEVICE, so it holds the
+            // unfiltered staff rows and the per-viewer filter runs on every render.
+            const _STAFF_KEY = 'mcal-staff-v2';
             const _isStaffUser = (u) => {
                 const st = String(u.status || '').toLowerCase();
                 if (st === 'inactive' || st === 'expired') return false;
                 let lvl = 12; try { lvl = getUserLevel(u); } catch (_) {}
                 return lvl <= 12 || lvl === 15;
             };
+            const _staffForViewer = (raw) => _dedupStaffByBday(_utils.filterTeamBirthdays(_state.cu, raw.filter(_isStaffUser), raw));
             const _cachedStaff = _lsGet(_STAFF_KEY, 8 * 60 * 60 * 1000);
             if (Array.isArray(_cachedStaff)) {
-                _mcalStaffList = _dedupStaffByBday(_cachedStaff);
+                _mcalStaffList = _staffForViewer(_cachedStaff);
             } else {
-                AppDataStore.queryAdvanced('users', { select: 'id,full_name,date_of_birth,ic_number,role,team,phone,status', limit: 50000, countMode: null })
+                _mcalStaffList = []; // never carry a previous viewer's list while refetching
+                AppDataStore.queryAdvanced('users', { select: 'id,full_name,date_of_birth,ic_number,role,team,phone,status,reporting_to', limit: 50000, countMode: null })
                     .then(r => r?.data || [])
                     .then(rows => {
-                        _mcalStaffList = _dedupStaffByBday((rows || []).filter(_isStaffUser));
-                        _lsSet(_STAFF_KEY, _mcalStaffList);
+                        // Staff-band rows only (no L13/L14). Inactive staff are never
+                        // shown, only walked through for the upline chain — keep just
+                        // the chain fields so their DOB/IC isn't cached on the device.
+                        const raw = (rows || []).filter(u => { const l = getUserLevel(u); return l <= 12 || l === 15; })
+                            .map(u => _isStaffUser(u) ? u : { id: u.id, full_name: u.full_name, role: u.role, status: u.status, reporting_to: u.reporting_to });
+                        _mcalStaffList = _staffForViewer(raw);
+                        _lsSet(_STAFF_KEY, raw);
                         // Re-render so staff markers appear once the list lands (guarded
                         // to the still-current month, mirrors the people refetch above).
                         const vp = document.getElementById('content-viewport');

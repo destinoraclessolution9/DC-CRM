@@ -3497,7 +3497,8 @@
             AppDataStore.getAll('names').catch(() => []),
             // Explicit select — getAll('users') is PII-trimmed and omits ic_number,
             // which the Team Birthdays IC-derived DOB needs. Mirror the mobile fetch.
-            AppDataStore.queryAdvanced('users', { select: 'id,full_name,date_of_birth,ic_number,role,team,status,phone', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []),
+            // reporting_to: Team Birthdays hides the viewer's upline chain.
+            AppDataStore.queryAdvanced('users', { select: 'id,full_name,date_of_birth,ic_number,role,team,status,phone,reporting_to', limit: 50000, countMode: null }).then(r => r?.data || []).catch(() => []),
         ]);
         const all = [...prospects, ...customers];
         const userMap = new Map(allUsers.map(u => [String(u.id), u]));
@@ -3645,8 +3646,8 @@
 
         // ===== TEAM BIRTHDAYS (staff / colleagues) =====
         // Internal team celebration widget — separate from client birthdays above.
-        // NOT RBAC-scoped: every staff member can see all colleagues' birthdays
-        // (this is intentional — it's a team-morale feature, not client PII).
+        // Not owner-scoped (peers + downline are visible), but agents never see
+        // their upline chain or anyone more senior (_utils.filterTeamBirthdays).
         // Excludes customer (L13) / referrer (L14) accounts that also live in the
         // users table, and inactive/expired staff.
         const teamTodayList = document.getElementById('team-bday-today-list');
@@ -3689,7 +3690,8 @@
             // MM-DD; prefer a row that has a phone (so Send Wish works). Also drops
             // staff with no birthday source (they can never match a day anyway).
             const _staffSeen = new Map();
-            for (const u of allUsers.filter(isStaff)) {
+            // Hide uplines + seniors BEFORE the dedup, chain walked on the raw list.
+            for (const u of _utils.filterTeamBirthdays(_state.cu, allUsers.filter(isStaff), allUsers)) {
                 const md = getStaffMMDD(u);
                 if (!md) continue;
                 const key = `${String(u.full_name || '').trim().toLowerCase()}|${md}`;
