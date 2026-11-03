@@ -755,6 +755,7 @@
             { nav: 'calendar',          label: 'Calendar',                 icon: 'fas fa-calendar-alt' },
             { nav: 'noticeboard',       label: '公告栏 Noticeboard',        icon: 'fas fa-bullhorn' },
             { nav: 'prospects',         label: 'Prospects & Customers',    icon: 'fas fa-users' },
+            { nav: 'name-list',         label: 'Name List',                icon: 'fas fa-list-check' },
             { nav: 'referrals',         label: 'Referral Relationships',   icon: 'fas fa-project-diagram' },
             { nav: 'pipeline',          label: 'Pipeline',                 icon: 'fas fa-filter' },
             { nav: 'promotions',        label: 'Monthly Promotion',        icon: 'fas fa-tags' },

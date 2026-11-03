@@ -1,5 +1,5 @@
 {
-  "script.js": 6920,
+  "script.js": 6930,
   "data.js": 4560,
   "data-helpers.js": 690,
   "ui.js": 813,
@@ -39,10 +39,11 @@
   "chunks/script-approvals.js": 1350,
   "chunks/script-settings.js": 933,
   "chunks/script-referrals.js": 2090,
-  "chunks/script-reporting.js": 7740,
+  "chunks/script-reporting.js": 7800,
   "chunks/script-search.js": 2430,
   "chunks/script-stock-take.js": 2670,
   "chunks/script-whatsapp.js": 713,
   "chunks/script-daily-note.js": 5970,
-  "chunks/script-tickets.js": 520
+  "chunks/script-tickets.js": 520,
+  "chunks/script-namelist.js": 845
 }

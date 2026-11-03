@@ -2081,7 +2081,7 @@ const appLogic = (() => {
         
         // List of all nav item suffixes
         const allNavIds = [
-            'calendar', 'pipeline', 'protection', 'agents', 'prospects', 'referrals',
+            'calendar', 'pipeline', 'protection', 'agents', 'prospects', 'name-list', 'referrals',
             'cases', 'documents', 'knowledge', 'import', 'promotions', 'marketing-automation', 'marketing-lists',
             'performance', 'reports', 'risk', 'admin',
             // Phase 17/19 dropdowns + gated tools — previously missing from this list,
@@ -4027,6 +4027,7 @@ function _wireLoginBtn() {
         'admin':                { chunk: 'chunks/script-admin.min.js',        minLevel: null, exactLevels: [1], navId: 'admin',               navLevels: [1, 2], title: 'Admin' },
         'security':             { chunk: 'chunks/script-admin.min.js',        minLevel: null, exactLevels: [1], navId: 'security',            navLevels: [1, 2], title: 'Security' },
         'org_chart':            { chunk: 'chunks/script-org.min.js',          minLevel: null, exactLevels: [1, 2], navId: 'org-chart',        navLevels: [1, 2], title: 'Org Chart Consultant' },
+        'name_list':            { chunk: 'chunks/script-namelist.min.js',    minLevel: null, exactLevels: null, navId: 'name-list',           navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Name List' },
         'pipeline':             { chunk: 'chunks/script-pipeline.min.js',    minLevel: null, exactLevels: null, navId: 'pipeline',            navLevels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], title: 'Pipeline' },
         'import':               { chunk: 'chunks/script-import.min.js',      minLevel: null, exactLevels: null, navId: 'import',              navLevels: [1, 2], title: 'Import / Export' },
         'protection':           { chunk: 'chunks/script-import.min.js',      minLevel: null, exactLevels: null, navId: 'protection',          navLevels: [1, 2, 3, 4], title: 'Protection Monitoring' },
@@ -4081,11 +4082,11 @@ function _wireLoginBtn() {
     // byte-identically. The agent band (L5-11) and the ambassador/customer/referrer
     // tier (L12-14) have explicit _VIEW_NAV_ORDER_OVERRIDE entries that define BOTH
     // their visible set and their display order (consumed in updateNavVisibility).
-    const _VIEW_NAV_ORDER = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'quarter-review', 'org-chart', 'ai-insights', 'security', 'workflows', 'lead_forms', 'surveys', 'contracts', 'booking_settings', 'order-form-extract'];
-    const _AGENT_NAV = ['calendar', 'fude', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'milestones', 'reports'];
+    const _VIEW_NAV_ORDER = ['calendar', 'prospects', 'name-list', 'referrals', 'pipeline', 'promotions', 'marketing-automation', 'marketing-lists', 'cases', 'purchases_history', 'agents', 'performance', 'reports', 'risk', 'admin', 'protection', 'documents', 'knowledge', 'import', 'integrations', 'settings', 'fude', 'milestones', 'noticeboard', 'custom_fields', 'egg-purchasing', 'standard-functions', 'formula-purchaser', 'stock-take', 'boss-report', 'quarter-review', 'org-chart', 'ai-insights', 'security', 'workflows', 'lead_forms', 'surveys', 'contracts', 'booking_settings', 'order-form-extract'];
+    const _AGENT_NAV = ['calendar', 'fude', 'prospects', 'name-list', 'referrals', 'pipeline', 'promotions', 'cases', 'milestones', 'reports'];
     const _VIEW_NAV_ORDER_OVERRIDE = {
         5:  _AGENT_NAV, 6: _AGENT_NAV, 7: _AGENT_NAV, 8: _AGENT_NAV, 9: _AGENT_NAV, 10: _AGENT_NAV,
-        11: ['calendar', 'fude', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'milestones'],
+        11: ['calendar', 'fude', 'prospects', 'name-list', 'referrals', 'pipeline', 'promotions', 'cases', 'milestones'],
         12: ['noticeboard', 'fude', 'milestones', 'prospects', 'referrals'],
         13: ['noticeboard', 'fude', 'milestones'],
         14: ['noticeboard', 'fude', 'milestones'],
@@ -4451,6 +4452,7 @@ function _wireLoginBtn() {
         protection:           async (vp) => { _currentView = 'protection'; await (window.app.showProtectionMonitoringView || (() => {}))(vp); },
         import:               async (vp) => { _currentView = 'import'; await (window.app.showImportDashboard || (() => {}))(vp); },
         integrations:         async (vp) => { _currentView = 'integrations'; await (window.app.showIntegrationHub || (() => {}))(vp); },
+        name_list:            async (vp) => { _currentView = 'name_list'; await (window.app.showNameListView || (() => {}))(vp); },
         referrals:            async (vp) => { _currentView = 'referrals'; (window.app.showReferralsView || (() => Promise.resolve()))(vp).catch(e => console.warn('referrals failed:', e)); },
         cases:                async (vp) => { _currentView = 'cases'; await (window.app.showCasesView || (() => {}))(vp); },
         marketing_lists:      async (vp) => { _currentView = 'marketing_lists'; await (window.app.showMarketingListsView || (() => {}))(vp); },

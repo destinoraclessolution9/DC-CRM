@@ -486,6 +486,7 @@
                 { view: 'calendar',             label: 'Calendar',                    icon: 'fas fa-calendar-alt' },
                 { view: 'noticeboard',          label: '📢 公告栏',                    icon: 'fas fa-bullhorn' },
                 { view: 'prospects',            label: 'Prospect / Customer',          icon: 'fas fa-users' },
+                { view: 'name_list',            label: 'Name List',                    icon: 'fas fa-list-check' },
                 { view: 'referrals',            label: 'Referral Management',          icon: 'fas fa-project-diagram' },
                 { view: 'pipeline',             label: 'Pipeline Management',          icon: 'fas fa-filter' },
                 { view: 'promotions',           label: 'Monthly Promotion',            icon: 'fas fa-bullhorn' },
@@ -536,22 +537,22 @@
     ];
 
     // Map drawer view names → nav ID suffix (only where they differ)
-    const _drawerViewToNavId = { 'marketing_automation': 'marketing-automation', 'marketing_lists': 'marketing-lists', 'egg_purchasing': 'egg-purchasing', 'formula_purchaser': 'formula-purchaser', 'stock_take': 'stock-take', 'boss_report': 'boss-report' };
+    const _drawerViewToNavId = { 'name_list': 'name-list', 'marketing_automation': 'marketing-automation', 'marketing_lists': 'marketing-lists', 'egg_purchasing': 'egg-purchasing', 'formula_purchaser': 'formula-purchaser', 'stock_take': 'stock-take', 'boss_report': 'boss-report' };
 
     // Returns the set of allowed nav IDs for the current user (mirrors updateNavVisibility logic)
     const _getAllowedNavIds = () => {
         // Agent band (L5-10) set — mirrors desktop _AGENT_NAV plus 'settings' (a mobile
         // drawer item). Knowledge HQ + Document Management dropped per the 2026 nav
         // curation (agents no longer see them); the desktop drawer order is by section.
-        const _agentNav = ['calendar', 'fude', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'milestones', 'settings'];
+        const _agentNav = ['calendar', 'fude', 'prospects', 'name-list', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'milestones', 'settings'];
         const perms = {
             // #5 fix: added 'knowledge' to L1-L4 and 'noticeboard'/'knowledge' to match desktop levelPermissions
-            1: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','purchases_history','agents','performance','reports','npo','risk','ai-insights','security','admin','protection','documents','knowledge','import','integrations','settings','fude','milestones','noticeboard','lead_forms','surveys','contracts','custom_fields','booking_settings','egg-purchasing','formula-purchaser','stock-take','org-chart'],
-            2: ['calendar','prospects','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','knowledge','import','integrations','settings','fude','milestones','noticeboard','lead_forms','surveys','contracts','custom_fields','booking_settings','org-chart'],
-            3: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','knowledge','settings','fude'],
-            4: ['calendar','prospects','referrals','pipeline','promotions','cases','performance','reports','protection','documents','knowledge','settings','fude'],
+            1: ['calendar','prospects','name-list','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','purchases_history','agents','performance','reports','npo','risk','ai-insights','security','admin','protection','documents','knowledge','import','integrations','settings','fude','milestones','noticeboard','lead_forms','surveys','contracts','custom_fields','booking_settings','egg-purchasing','formula-purchaser','stock-take','org-chart'],
+            2: ['calendar','prospects','name-list','referrals','pipeline','promotions','marketing-automation','marketing-lists','cases','agents','performance','reports','risk','ai-insights','security','admin','protection','documents','knowledge','import','integrations','settings','fude','milestones','noticeboard','lead_forms','surveys','contracts','custom_fields','booking_settings','org-chart'],
+            3: ['calendar','prospects','name-list','referrals','pipeline','promotions','cases','performance','reports','protection','documents','knowledge','settings','fude'],
+            4: ['calendar','prospects','name-list','referrals','pipeline','promotions','cases','performance','reports','protection','documents','knowledge','settings','fude'],
             5: _agentNav, 6: _agentNav, 7: _agentNav, 8: _agentNav, 9: _agentNav, 10: _agentNav,
-            11: ['calendar','fude','prospects','referrals','pipeline','promotions','cases','milestones','settings'],
+            11: ['calendar','fude','prospects','name-list','referrals','pipeline','promotions','cases','milestones','settings'],
             // #6 fix: added 'noticeboard' to L12/L13/L14 (customers must reach Noticeboard on mobile)
             12: ['noticeboard','prospects','referrals','fude','milestones'],
             13: ['noticeboard','fude','milestones'],

@@ -146,7 +146,7 @@ t("revoke navId 'calendar' blocks alias view 'month' (@calendar)", env._isViewAl
 _mobile = false;
 env.setOvr([], ['calendar']);
 t('L5 desktop with calendar revoked lands on next allowed (fude)', env._defaultViewFor({ __lvl: 5 }) === 'fude');
-env.setOvr([], ['calendar', 'fude', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'milestones', 'reports']);
+env.setOvr([], ['calendar', 'fude', 'prospects', 'name-list', 'referrals', 'pipeline', 'promotions', 'cases', 'milestones', 'reports']);
 t('L5 with EVERYTHING revoked falls back to role default (no loop, no crash)', env._defaultViewFor({ __lvl: 5 }) === 'calendar');
 _mobile = true;
 t('L5 mobile keeps home (NO_NAV) even with revokes', env._defaultViewFor({ __lvl: 5 }) === 'home');
@@ -159,7 +159,7 @@ t('L13 default fude unaffected', env._defaultViewFor({ __lvl: 13 }) === 'fude');
 // ── 9. Grantable set sanity ────────────────────────────────────────────────
 const grantable = env._navGrantableFrom(env.VIEWS);
 const mustLock = ['admin', 'security', 'boss-report', 'quarter-review', 'egg-purchasing', 'formula-purchaser', 'org-chart', 'marketing-automation', 'marketing-lists', 'workflows', 'ai-insights', 'integrations', 'stock-take'];
-const mustAllow = ['calendar', 'prospects', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'knowledge', 'settings', 'performance', 'milestones', 'fude', 'noticeboard'];
+const mustAllow = ['calendar', 'prospects', 'name-list', 'referrals', 'pipeline', 'promotions', 'cases', 'reports', 'documents', 'knowledge', 'settings', 'performance', 'milestones', 'fude', 'noticeboard'];
 t('locked set: none of the admin-band navIds are grantable', mustLock.every((id) => !grantable.has(id)));
 t('grantable set: the working set is grantable', mustAllow.every((id) => grantable.has(id)));
 t("extra-nav ids (risk/standard-functions) are not grantable (not in VIEWS)", !grantable.has('risk') && !grantable.has('standard-functions'));

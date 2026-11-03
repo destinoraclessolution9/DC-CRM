@@ -183,10 +183,10 @@
                     <div style="grid-column:1/-1; text-align:center; padding:32px; color:var(--gray-400);"><i class="fas fa-spinner fa-spin"></i> Loading KPI data...</div>
                 </div>
 
-                <!-- Name List — Who to Focus (owner ask 2026-08-10). Filled by
-                     renderNameListSection; kept as an empty anchor here so the
+                <!-- Name List pointer (the section moved to its own page 2026-11-03).
+                     Filled by renderNameListMoved; kept as an empty anchor here so the
                      legacy shell positions it between the KPI grid and the
-                     charts row. The React shell lacks it — renderNameListSection
+                     charts row. The React shell lacks it — renderNameListMoved
                      self-injects after #kpi-stats-grid there (People Met pattern). -->
                 <div id="name-list-section" style="margin-top:24px;"></div>
 
@@ -1492,7 +1492,7 @@
             renderHeadcountTable().catch(e => console.warn('renderHeadcountTable failed:', e)),
             renderActivityAttendanceDetails().catch(e => console.warn('renderActivityAttendanceDetails failed:', e)),
             renderPeopleMetSection().catch(e => console.warn('renderPeopleMetSection failed:', e)),
-            renderNameListSection().catch(e => console.warn('renderNameListSection failed:', e)),
+            renderNameListMoved().catch(e => console.warn('renderNameListMoved failed:', e)),
             renderChuanfuSection().catch(e => console.warn('renderChuanfuSection failed:', e)),
             renderHuijiConversionSection().catch(e => console.warn('renderHuijiConversionSection failed:', e)),
             // Hierarchical target comparison runs in the same parallel batch.
@@ -3599,6 +3599,9 @@ const _getNameListData = () => _cachedWindow('nameListData', async () => {
 let _nlOpen = (() => { try { return localStorage.getItem('fs_nl_open') === '1'; } catch (_) { return false; } })();
 let _nlTab = 'referral';
 let _nlLast = null;
+// true while rendered inside the Name List page (sidebar, 2026-11-03): always
+// open, no 📈 Event results tab (that page has its own Results tab).
+let _nlEmbedded = false;
 const _nlExpanded = new Set();
 
 // 招商 / 风水 / Power Ring / 财库 tabs → 🎯 Smart lists (2026-10-28, owner): the
@@ -3856,6 +3859,7 @@ const nlSmartSet = () => {
 };
 
 const _nlBodyHtml = (d) => {
+    if (_nlEmbedded && _nlTab === 'results') _nlTab = 'referral';
     const counts = {
         referral: d.referral.agents.length + d.referral.clients.length,
         coverage: d.coverage.custNotMet.length,
@@ -3864,7 +3868,7 @@ const _nlBodyHtml = (d) => {
         results: _nlResults ? _nlResults.length : '',
         audited: d.audited.length,
     };
-    const tabs = NL_TABS.map(([key, icon, label]) => `
+    const tabs = NL_TABS.filter(t => !(_nlEmbedded && t[0] === 'results')).map(([key, icon, label]) => `
         <button onclick="app.nlTab('${key}')" style="border:1px solid ${_nlTab === key ? 'var(--primary,#0D9488)' : 'var(--border,#e5e0d8)'};background:${_nlTab === key ? 'var(--primary,#0D9488)' : 'var(--gray-50,#f7f4ed)'};color:${_nlTab === key ? '#fff' : 'var(--gray-600,#5f5e5a)'};border-radius:16px;padding:5px 12px;font-size:12px;cursor:pointer;white-space:nowrap;">
             ${icon} ${label} <span id="nl-tab-n-${key}" style="font-weight:700;">${counts[key]}</span>
         </button>`).join('');
@@ -3901,7 +3905,7 @@ const _nlRenderBody = async () => {
     }
 };
 
-const renderNameListSection = async () => {
+const _nlContainer = () => {
     let container = document.getElementById('name-list-section');
     if (!container) {
         // React ReportsView hardcodes its own shell without this container —
@@ -3909,13 +3913,27 @@ const renderNameListSection = async () => {
         // and the Revenue Trend chart in BOTH shells (People Met pattern).
         const grid = document.getElementById('kpi-stats-grid');
         const root = grid?.parentNode || document.querySelector('.kpi-dashboard');
-        if (!root) return;
+        if (!root) return null;
         container = document.createElement('div');
         container.id = 'name-list-section';
         container.style.marginTop = '24px';
         if (grid && grid.nextSibling) root.insertBefore(container, grid.nextSibling);
         else root.appendChild(container);
     }
+    return container;
+};
+
+// host given = the Name List page's 🎯 Who to Focus tab (always open).
+const renderNameListSection = async (host = null) => {
+    if (host && host.nodeType === 1) {
+        _nlEmbedded = true;
+        host.innerHTML = '<div class="kpi-card"><div id="nl-body"></div></div>';
+        await _nlRenderBody();
+        return;
+    }
+    _nlEmbedded = false;
+    const container = _nlContainer();
+    if (!container) return;
     container.innerHTML = `
         <div class="kpi-card">
             <h3 class="kpi-card-title" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" onclick="app.nlToggle()">
@@ -3927,6 +3945,34 @@ const renderNameListSection = async () => {
             <div id="nl-body" ${_nlOpen ? '' : 'style="display:none;"'}></div>
         </div>`;
     if (_nlOpen) await _nlRenderBody();
+};
+
+// Reports: the Name List moved to its own sidebar page (2026-11-03, owner) —
+// a pointer stays in the same spot (People Met / 传福大使 anchor after it).
+const renderNameListMoved = async () => {
+    const container = _nlContainer();
+    if (!container) return;
+    container.innerHTML = `
+        <div class="kpi-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <span style="font-size:14px;"><b>📇 Name List</b> <span style="color:var(--gray-500);">— Who to Focus, saved lists and their results now have their own page in the menu.</span></span>
+            <button class="btn secondary" style="font-size:13px;" onclick="app.navigateTo('name_list')">Open Name List →</button>
+        </div>`;
+};
+
+// 📈 Event results for the Name List page's Results tab (same table, all rows).
+const nlRenderEventResults = async (host) => {
+    if (!host) return;
+    const sb = window.supabase || window.supabaseClient;
+    try {
+        const { data, error } = await sb.rpc('event_invite_results', { p_days: 120 });
+        if (error) throw error;
+        _nlResults = data || [];
+        _nlExpanded.add('results');
+        host.innerHTML = _nlResultsHtml();
+        host.querySelectorAll('button[onclick*="nlExpand"]').forEach(b => b.parentElement.remove());
+    } catch (e) {
+        host.innerHTML = `<p style="padding:14px;color:var(--gray-400);font-size:13px;">Could not load — please retry. (${escapeHtml(e && e.message || 'unknown error')})</p>`;
+    }
 };
 
 const nlToggle = () => {
@@ -7717,8 +7763,11 @@ const exportKPIReport = async (format) => {
         wrConfirmRange,
         wrApplyPreset,
         wrFigureInput,
-        // Name List — Who to Focus
+        // Name List — Who to Focus (rendered by the Name List page since 2026-11-03)
         nlToggle,
+        renderNameListSection,
+        renderNameListMoved,
+        nlRenderEventResults,
         nlSmartSet,
         renderChuanfuSection,
         cfToggle,

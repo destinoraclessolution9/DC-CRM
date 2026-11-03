@@ -2222,8 +2222,8 @@ const _pvFillInvitePrefs = async (kind, id) => {
         const { data, error } = await sb.from(kind === 'customer' ? 'customers' : 'prospects')
             .select('do_not_invite,prefers_call').eq('id', Number(id)).maybeSingle();
         if (error || !data) return;
-        el.innerHTML = `<span class="pv-invpref-l">🎯 Event invites</span>
-            <label><input type="checkbox" ${data.do_not_invite ? 'checked' : ''} onchange="app.pvSetInvitePref('${kind}', ${Number(id)}, 'do_not_invite', this.checked)"> Do not invite</label>
+        el.innerHTML = `<span class="pv-invpref-l">🎯 Invites &amp; lists</span>
+            <label title="Asked not to be contacted for promotions: never put on an event invite or a Name List"><input type="checkbox" ${data.do_not_invite ? 'checked' : ''} onchange="app.pvSetInvitePref('${kind}', ${Number(id)}, 'do_not_invite', this.checked)"> 不要联系 Do not contact</label>
             <label><input type="checkbox" ${data.prefers_call ? 'checked' : ''} onchange="app.pvSetInvitePref('${kind}', ${Number(id)}, 'prefers_call', this.checked)"> Prefers a call (no WhatsApp)</label>
             <button type="button" class="btn secondary" onclick="event.stopPropagation();app.pvInviteToEvent('${kind}', ${Number(id)})">🎯 Invite to an event</button>`;
     } catch (_) { /* the line just stays empty */ }
@@ -2301,7 +2301,7 @@ const pvSetInvitePref = async (kind, id, field, on) => {
     if (!sb || !['do_not_invite', 'prefers_call'].includes(field)) return;
     const { error } = await sb.from(kind === 'customer' ? 'customers' : 'prospects').update({ [field]: !!on }).eq('id', Number(id));
     if (error) { UI.toast.error('Could not save: ' + error.message); _pvFillInvitePrefs(kind, id); return; }
-    UI.toast.success(field === 'do_not_invite' ? (on ? 'Will not be suggested for events' : 'Can be suggested for events again') : (on ? 'Call instead of WhatsApp' : 'WhatsApp is fine'));
+    UI.toast.success(field === 'do_not_invite' ? (on ? 'Do not contact — no event invites or name lists' : 'Can be contacted again') : (on ? 'Call instead of WhatsApp' : 'WhatsApp is fine'));
 };
 
 const fillProfileSnapshot = async ({ kind = 'prospect', id, pid = null } = {}) => {

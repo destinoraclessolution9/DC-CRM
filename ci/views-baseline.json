@@ -92,6 +92,11 @@
         2
       ]
     },
+    "name_list": {
+      "src": "chunks/script-namelist.min.js",
+      "minLevel": null,
+      "exactLevels": null
+    },
     "pipeline": {
       "src": "chunks/script-pipeline.min.js",
       "minLevel": null,
@@ -219,7 +224,12 @@
     "ranking": {
       "src": "chunks/script-performance.min.js",
       "minLevel": null,
-      "exactLevels": [1, 2, 3, 4]
+      "exactLevels": [
+        1,
+        2,
+        3,
+        4
+      ]
     },
     "performance": {
       "src": "chunks/script-performance.min.js",
@@ -306,6 +316,7 @@
     "admin": "Admin",
     "security": "Security",
     "org_chart": "Org Chart Consultant",
+    "name_list": "Name List",
     "pipeline": "Pipeline",
     "import": "Import / Export",
     "protection": "Protection Monitoring",
@@ -341,6 +352,7 @@
     "1": [
       "calendar",
       "prospects",
+      "name-list",
       "referrals",
       "pipeline",
       "promotions",
@@ -382,6 +394,7 @@
     "2": [
       "calendar",
       "prospects",
+      "name-list",
       "referrals",
       "pipeline",
       "promotions",
@@ -415,6 +428,7 @@
     "3": [
       "calendar",
       "prospects",
+      "name-list",
       "referrals",
       "pipeline",
       "promotions",
@@ -431,6 +445,7 @@
     "4": [
       "calendar",
       "prospects",
+      "name-list",
       "referrals",
       "pipeline",
       "promotions",
@@ -448,6 +463,7 @@
       "calendar",
       "fude",
       "prospects",
+      "name-list",
       "referrals",
       "pipeline",
       "promotions",
@@ -459,6 +475,7 @@
       "calendar",
       "fude",
       "prospects",
+      "name-list",
       "referrals",
       "pipeline",
       "promotions",
@@ -470,6 +487,7 @@
       "calendar",
       "fude",
       "prospects",
+      "name-list",
       "referrals",
       "pipeline",
       "promotions",
@@ -481,6 +499,7 @@
       "calendar",
       "fude",
       "prospects",
+      "name-list",
       "referrals",
       "pipeline",
       "promotions",
@@ -492,6 +511,7 @@
       "calendar",
       "fude",
       "prospects",
+      "name-list",
       "referrals",
       "pipeline",
       "promotions",
@@ -503,6 +523,7 @@
       "calendar",
       "fude",
       "prospects",
+      "name-list",
       "referrals",
       "pipeline",
       "promotions",
@@ -514,6 +535,7 @@
       "calendar",
       "fude",
       "prospects",
+      "name-list",
       "referrals",
       "pipeline",
       "promotions",

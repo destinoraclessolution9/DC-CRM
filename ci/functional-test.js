@@ -115,6 +115,7 @@ const ALL_VIEWS = [
   { view:'knowledge',           chunk:'script-knowledge'          },
   { view:'cases',               chunk:'script-cases'              },
   { view:'referrals',           chunk:'script-referrals'          },
+  { view:'name_list',           chunk:'script-namelist'           },
   { view:'ranking',             chunk:'script-performance'        },
   { view:'performance',         chunk:'script-performance'        },
   { view:'noticeboard',         chunk:'script-performance'        },

@@ -12365,3 +12365,70 @@ button.pv-card:focus-visible { outline: 2px solid var(--accent, #E84393); outlin
 .inv-pick-m { font-size: 12px; color: var(--gray-500); }
 .inv-pick-st { font-size: 12.5px; color: var(--gray-600); white-space: nowrap; }
 .inv-pick-warn { font-size: 12.5px; color: #92400e; padding: 4px 0 2px; }
+
+/* 📇 Name List page — saved target lists (2026-11-03). Rows reuse the .inv-* look of ✨ Who to invite. */
+.nlp { max-width: 1100px; margin: 0 auto; padding: 16px 20px 40px; container-type: inline-size; }
+.nlp-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 10px; }
+.nlp-title { margin: 0; font-size: 22px; }
+.nlp-sub { font-size: 13px; color: var(--gray-500); margin-top: 2px; }
+.nlp-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 14px; border-bottom: 1px solid var(--gray-200); }
+.nlp-tab { border: 0; background: none; padding: 8px 12px; font: inherit; font-size: 14px; color: var(--gray-500); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.nlp-tab.is-on { color: var(--gray-900); font-weight: 600; border-bottom-color: var(--primary, #0D9488); }
+.nlp-bar-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.nlp-filters, .nlp-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.nlp-chip { border: 1px solid var(--gray-200); background: var(--bg-surface, #fff); border-radius: 16px; padding: 5px 12px; font: inherit; font-size: 13px; color: var(--gray-600); cursor: pointer; }
+.nlp-chip.is-on { background: var(--gray-900); border-color: var(--gray-900); color: #fff; }
+.nlp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.nlp-card { display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; padding: 12px 14px; border: 1px solid var(--gray-200); border-radius: 10px; background: var(--bg-surface, #fff); }
+.nlp-card:hover { border-color: var(--gray-400); }
+.nlp-card-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.nlp-card-name { font-weight: 600; color: var(--gray-900); flex: 1; min-width: 0; }
+.nlp-card-meta { font-size: 12.5px; color: var(--gray-500); margin: 4px 0 6px; }
+.nlp-bar { height: 4px; border-radius: 2px; background: var(--gray-100); overflow: hidden; margin-bottom: 2px; }
+.nlp-bar > span { display: block; height: 100%; background: var(--primary, #0D9488); }
+.nlp-funnel { border-bottom: 0; padding-bottom: 0; }
+.nlp-st { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 9px; background: var(--gray-100); color: var(--gray-600); white-space: nowrap; }
+.nlp-st-active { background: rgba(4, 120, 87, .12); color: #047857; }
+.nlp-st-draft { background: rgba(217, 119, 6, .12); color: #92400e; }
+.nlp-empty { text-align: center; padding: 28px 16px; color: var(--gray-500); font-size: 13.5px; }
+.nlp-empty-t { font-size: 15px; font-weight: 600; color: var(--gray-900); margin-bottom: 4px; }
+.nlp-back { margin-bottom: 10px; }
+.nlp-detail { background: var(--bg-surface, #fff); }
+.nlp-d-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.nlp-d-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.nlp-d-title h3 { margin: 0; font-size: 18px; }
+.nlp-d-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.nlp-vsel { width: auto; min-width: 0; font-size: 12px; padding: 2px 8px; height: auto; }
+.nlp-banner { font-size: 13px; padding: 8px 10px; border-radius: 8px; background: rgba(217, 119, 6, .1); color: #92400e; margin: 6px 0; }
+.nlp-next { font-size: 12.5px; color: var(--gray-900); margin-top: 4px; }
+.nlp-prog { font-size: 12.5px; color: var(--gray-600); margin-top: 4px; }
+.nlp-more { margin-top: 6px; }
+.nlp-addhead { padding-bottom: 4px; }
+.nlp-form { display: grid; gap: 8px; }
+.nlp-lbl { font-size: 12.5px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 3px; }
+.nlp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.nlp-purposes { display: flex; gap: 6px 14px; flex-wrap: wrap; }
+.nlp-radio { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; cursor: pointer; }
+.nlp-table-wrap { overflow-x: auto; border: 1px solid var(--gray-200); border-radius: 8px; }
+.nlp-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 640px; }
+.nlp-table th { text-align: right; font-weight: 600; color: var(--gray-500); padding: 8px 10px; border-bottom: 1px solid var(--gray-200); white-space: nowrap; }
+.nlp-table td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--gray-100); font-variant-numeric: tabular-nums; }
+.nlp-table th:first-child, .nlp-table td:first-child { text-align: left; }
+.nlp-tr { cursor: pointer; }
+.nlp-tr:hover td { background: var(--gray-50, #F8F9FA); }
+@media (max-width: 640px) {
+    .nlp { padding: 12px 12px 90px; }
+    .nlp-cards { grid-template-columns: 1fr; }
+    .nlp-grid { grid-template-columns: 1fr; }
+    .nlp-btns { width: 100%; }
+    .nlp-btns .btn { flex: 1; }
+}
+/* narrow page (phone, or a squeezed content column): actions under the person */
+@media (max-width: 640px) { .nlp .inv-row { grid-template-columns: 1fr; } .nlp .inv-acts { justify-content: flex-start; } }
+@container (max-width: 620px) {
+    .nlp .inv-row { grid-template-columns: 1fr; }
+    .nlp .inv-acts { justify-content: flex-start; }
+    .nlp-cards { grid-template-columns: 1fr; }
+    .nlp-d-head { flex-direction: column; }
+    .nlp .inv-acts .btn { padding-left: 10px; padding-right: 10px; }
+}

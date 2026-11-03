@@ -64,6 +64,7 @@ const JS_TARGETS = [
   'chunks/script-autopilot.js',
   // Big event ticket categories (2026-11-03) — event form, attendee picker, seat summary
   'chunks/script-tickets.js',
+  'chunks/script-namelist.js',
   // Phase 4I: Full Calendar + Follow-up Automation Engine (extracted 2026-06-05)
   'chunks/script-calendar.js',
   // Phase 4J: Prospect & Customer Management (extracted 2026-06-05)
