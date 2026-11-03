@@ -11670,6 +11670,65 @@ html, body {
     .att-row .att-checks { gap: 2px 8px; }
 }
 
+/* ── Big event ticket categories (chunks/script-tickets.js) ─────────────────
+   Event-form editor (one card per category, seats per team), the picker in
+   Add Attendee / Add Agent, the attendee-row chip, the seat summary and the
+   "run out" pop-up. Amber = full, red = over. */
+.tt-ed { margin: 4px 0 14px; }
+.tt-ed-head { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.tt-card { border: 1px solid var(--border, #e5e0d8); border-radius: 8px; padding: 10px; margin-bottom: 8px; background: var(--gray-50, #faf9f7); }
+.tt-card-top { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.tt-card-top .tt-name { flex: 1; font-weight: 600; }
+.tt-x { flex: none; width: 30px; height: 30px; border: none; border-radius: 6px; background: #FEE2E2; color: #991B1B; font-size: 18px; line-height: 1; cursor: pointer; }
+.tt-grid, .tt-seats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px 8px; }
+.tt-grid label, .tt-seats label { display: flex; flex-direction: column; gap: 2px; margin: 0; font-size: 11px; font-weight: 500; color: var(--gray-500); }
+.tt-seats-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 10px 0 4px; font-size: 12px; font-weight: 600; }
+.tt-seats-head small { font-weight: 400; color: var(--gray-500); }
+.tt-link { border: none; background: none; padding: 0; color: var(--primary); font-size: 12px; text-decoration: underline; cursor: pointer; white-space: nowrap; }
+.tt-empty { font-size: 12px; color: var(--gray-500); padding: 6px 0 10px; }
+.tt-add { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.tt-pick { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border, #e5e0d8); }
+.tt-pick-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 10px; margin-bottom: 6px; font-size: 13px; font-weight: 600; }
+.tt-pick-for { font-size: 11px; font-weight: 400; color: var(--gray-500); }
+.tt-pick-team { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 11px; font-weight: 400; color: var(--gray-500); }
+.tt-pick-team select { width: auto; min-width: 110px; padding: 2px 6px; height: auto; font-size: 12px; }
+.tt-opts { display: flex; flex-direction: column; gap: 6px; }
+.tt-opt { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "r n p" "r l l"; gap: 0 10px; align-items: center; margin: 0; padding: 8px 10px; border: 1px solid var(--border, #e5e0d8); border-radius: 8px; cursor: pointer; font-weight: 400; }
+.tt-opt input { grid-area: r; margin: 0; width: 16px; height: 16px; }
+.tt-opt-name { grid-area: n; font-weight: 600; font-size: 13px; }
+.tt-opt-price { grid-area: p; font-size: 13px; white-space: nowrap; }
+.tt-opt-price s { color: var(--gray-400); font-size: 11px; margin-left: 2px; }
+.tt-opt-price em { font-style: normal; font-size: 10px; color: #065f46; background: #D1FAE5; padding: 1px 5px; border-radius: 8px; margin-left: 2px; }
+.tt-opt-left { grid-area: l; font-size: 11px; color: var(--gray-500); }
+.tt-opt.is-on { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.tt-opt.is-full { background: #FFFBEB; border-color: #F59E0B; }
+.tt-opt.is-full .tt-opt-left { color: #92400E; font-weight: 600; }
+
+.tt-chip { display: inline-flex; align-items: center; margin-left: 5px; padding: 1px 7px; border: 1px solid #C7D2FE; border-radius: 10px; background: #EEF2FF; color: #3730A3; font-size: 10px; font-weight: 600; line-height: 1.6; white-space: nowrap; cursor: default; }
+button.tt-chip { cursor: pointer; }
+.tt-chip-empty { background: #FFFBEB; border-color: #F59E0B; color: #92400E; }
+
+.tt-sum { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin: 2px 0 8px; font-size: 11px; }
+.tt-sum-team { font-weight: 600; color: var(--gray-500); margin-right: 2px; }
+.tt-sum-item { padding: 1px 7px; border-radius: 10px; background: var(--gray-100, #f3f4f6); white-space: nowrap; }
+.tt-sum-item.is-full, .tt-sum-table td.is-full { background: #FEF3C7; color: #92400E; }
+.tt-sum-item.is-over, .tt-sum-table td.is-over { background: #FEE2E2; color: #991B1B; font-weight: 600; }
+.tt-sum-wrap { margin: 2px 0 10px; overflow-x: auto; }
+.tt-sum-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tt-sum-table th, .tt-sum-table td { padding: 4px 6px; border-bottom: 1px solid var(--gray-100, #eee); text-align: center; white-space: nowrap; }
+.tt-sum-table th:first-child, .tt-sum-table td:first-child { text-align: left; }
+.tt-sum-table th { font-weight: 600; color: var(--gray-500); }
+.tt-sum-table tfoot td { font-weight: 600; border-bottom: none; }
+.tt-sum-none { color: var(--gray-500); }
+.tt-sum-note { font-size: 10px; color: var(--gray-400); margin-top: 3px; }
+
+.tt-full-pop { position: fixed; inset: 0; z-index: 100000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(17, 24, 39, 0.45); }
+.tt-full-card { width: 100%; max-width: 360px; padding: 18px; border-radius: 12px; background: var(--bg-surface, #fff); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25); }
+.tt-full-title { font-size: 16px; font-weight: 700; color: #92400E; margin-bottom: 6px; }
+.tt-full-msg { font-size: 13px; line-height: 1.5; color: var(--gray-600, #4b5563); margin-bottom: 14px; }
+.tt-full-btns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
 /* ── Profile view (shared) ────────────────────────────────────────────────
    Prospect + customer profile pages, and the Meet-Up History / Brief modals
    that reuse the meet-up timeline. Was three inline copies (an injected

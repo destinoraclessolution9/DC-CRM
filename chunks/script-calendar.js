@@ -4897,9 +4897,11 @@
                 <div class="detail-section">
                     <h4>Event Details</h4>
                     ${activity.event_id ? `<div class="info-row"><span class="info-label">出席人数目标:</span> <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;"><input type="number" min="0" step="1" value="${marketingEvent.target_attendance != null ? escapeHtml(String(marketingEvent.target_attendance)) : ''}" placeholder="—" class="form-control" style="max-width:110px;" onchange="app.saveEventTargetAttendance(${activity.event_id}, this.value)"><span style="font-size:11px;color:#9CA3AF;">人 · Target</span></span></div>` : ''}
-                    ${marketingEvent.ticket_price ? `<div class="info-row"><span class="info-label">Ticket Price:</span> <span>RM ${marketingEvent.ticket_price}</span></div>` : ''}
+                    ${(marketingEvent.is_big_event && Array.isArray(marketingEvent.ticket_tiers) && marketingEvent.ticket_tiers.length)
+                        ? `<div class="info-row"><span class="info-label">Tickets:</span> <span>${marketingEvent.ticket_tiers.map(t => `${esc(t.name || '')} ${esc(UI.money(t.price, marketingEvent.country))}`).join(' · ')}</span></div>`
+                        : `${marketingEvent.ticket_price ? `<div class="info-row"><span class="info-label">Ticket Price:</span> <span>RM ${marketingEvent.ticket_price}</span></div>` : ''}
                     ${marketingEvent.early_bird_price ? `<div class="info-row"><span class="info-label">Early Bird Price:</span> <span>RM ${marketingEvent.early_bird_price}</span></div>` : ''}
-                    ${marketingEvent.group_purchase_price ? `<div class="info-row"><span class="info-label">Group Purchase Price:</span> <span>RM ${marketingEvent.group_purchase_price}</span></div>` : ''}
+                    ${marketingEvent.group_purchase_price ? `<div class="info-row"><span class="info-label">Group Purchase Price:</span> <span>RM ${marketingEvent.group_purchase_price}</span></div>` : ''}`}
                     ${marketingEvent.duration ? `<div class="info-row"><span class="info-label">Duration:</span> <span>${esc(marketingEvent.duration)}</span></div>` : ''}
                     ${marketingEvent.target_group ? `<div class="info-row"><span class="info-label">Target Group:</span> <span>${esc(marketingEvent.target_group)}</span></div>` : ''}
                     ${marketingEvent.remarks ? `<div class="info-row"><span class="info-label">Remarks:</span> <span>${esc(marketingEvent.remarks)}</span></div>` : ''}
@@ -5689,6 +5691,14 @@
             })();
             const _isCheckInLead = !!_viewer && ['registration_lead', 'registration_lead_2']
                 .some(k => _sessRolesForView[k] && String(_sessRolesForView[k].id) === String(_viewer.id));
+            // Big event: ticket chip per attendee + seat summary (tickets chunk —
+            // pull it in first; without it the list just renders without tickets).
+            const _isBigEvent = !!(marketingEvent && marketingEvent.is_big_event);
+            if (_isBigEvent && !window.app.ttAttendeeChip) {
+                try { await window._loadChunk('chunks/script-tickets.min.js'); } catch (_) { /* intentional: list renders without tickets */ }
+            }
+            const _ticketChip = (att, canEdit) => (_isBigEvent && window.app.ttAttendeeChip)
+                ? window.app.ttAttendeeChip(att, marketingEvent, canEdit, activityId) : '';
             const _canSeeAttendeeName = (att) => {
                 if (_orgWide || _isOwnActivity) return true;
                 const adderId = att.added_by_agent_id != null ? String(att.added_by_agent_id) : null;
@@ -5727,6 +5737,7 @@
                                 : `<strong class="att-name">${esc(name)}</strong>`}
                             <span class="att-chip">${esc(att.attendee_type || 'prospect')}</span>
                             <span class="att-by">by ${esc(agentName)}</span>
+                            ${_ticketChip(att, _ownView)}
                         </div>
                         <div class="att-checks">
                             <label><input type="checkbox" ${paidChecked} onchange="app.toggleAttendeePaid(${att.id}, this.checked)">Paid</label>
@@ -5760,6 +5771,7 @@
                             ${nameDisplay}
                             <span class="att-chip att-chip-role">${escapeHtml(roleLabel)}</span>
                             <span class="att-by">by ${esc(addedByName)}</span>
+                            ${_ticketChip(att, true)}
                         </div>
                         <div class="att-checks">
                             <label><input type="checkbox" ${attendedChecked} data-att-kind="attended" onchange="app.toggleAttendeeAttended(${att.id}, this.checked, ${entityId}, 'agent', ${activity.event_id}, '${UI.escJsAttr(String(activity.activity_date||''))}', ${activity.id}, this)">Attended</label>
@@ -5778,9 +5790,10 @@
             const prospectSection = `
                 <div class="detail-section">
                     <h4>Attendees <span style="font-size:11px;color:#9CA3AF;font-weight:400;">(${prospectAttendees.length}${marketingEvent && marketingEvent.target_attendance != null ? ` / 目标 ${escapeHtml(String(marketingEvent.target_attendance))}` : ''})</span></h4>
+                    ${_isBigEvent ? `<div id="tt-sum-${Number(activityId)}"></div>` : ''}
                     ${prospectRows || '<div class="info-row">No prospect/customer attendees.</div>'}
                     <div style="margin-top:10px; text-align:right;">
-                        <button class="btn-add-slot" onclick="app.showAddAttendeeSearch('${activity.event_id}', '${activityId}')"><i class="fas fa-user-plus"></i> + Add Attendee</button>
+                        <button class="btn-add-slot" onclick="app.showAddAttendeeSearch('${activity.event_id}', '${activityId}', '${UI.escJsAttr(String(activity.activity_date || ''))}')"><i class="fas fa-user-plus"></i> + Add Attendee</button>
                     </div>
                     <div id="cw-rec-${Number(activityId)}"></div>
                 </div>
@@ -5792,7 +5805,7 @@
                     <h4>Agent Attendance <span style="font-size:11px;color:#9CA3AF;font-weight:400;">(${agentAttendees.length})</span></h4>
                     ${agentRows || '<div class="info-row">No agents/consultants added.</div>'}
                     <div style="margin-top:10px; text-align:right;">
-                        <button class="btn-add-slot" onclick="app.showAddConsultantSearch('${activity.event_id}', '${activityId}')"><i class="fas fa-user-tie"></i> + Add Agent / Consultant</button>
+                        <button class="btn-add-slot" onclick="app.showAddConsultantSearch('${activity.event_id}', '${activityId}', '${UI.escJsAttr(String(activity.activity_date || ''))}')"><i class="fas fa-user-tie"></i> + Add Agent / Consultant</button>
                     </div>
                 </div>
             `;
@@ -5915,6 +5928,11 @@
 
         UI.showModal('Activity Details', content, []);
         if (document.getElementById('esm-body')) _esmFill();
+        // 🎟 Big event seat summary (counts RPC — async so the modal opens at once).
+        if (document.getElementById(`tt-sum-${Number(activityId)}`) && window.app.ttFillSessionSummary) {
+            window.app.ttFillSessionSummary(`tt-sum-${Number(activityId)}`, marketingEvent, activity.activity_date)
+                .catch(e => console.warn('[tickets] summary', e));
+        }
         // ✨ Who to invite first; the 🎟️ waiting list only shows when the event has no purpose yet.
         if (document.getElementById(`inv-sec-${Number(activityId)}`)) {
             _invFill(activityId).finally(() => { if (!_invHasPurpose(activityId) && document.getElementById(`cw-rec-${Number(activityId)}`)) _cwFill(activityId); });

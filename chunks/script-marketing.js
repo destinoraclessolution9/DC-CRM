@@ -1091,9 +1091,7 @@
                 <div id="huiji-owner-section" style="display:none;margin:12px 0;padding:12px;border:1px solid #fbcfe8;border-radius:8px;background:#fdf2f8;"></div>
                 <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control"></div>
                 <div class="form-group"><label>Market / Country</label><select id="mkt-event-country" class="form-control">${(UI.countries || []).map(c => `<option value="${c.code}" ${c.code === window._crmUtils.cuHomeCountry() ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.symbol)})</option>`).join('')}</select></div>
-                <div class="form-group"><label>Ticket Price</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
-                <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" placeholder="e.g. 199"></div>
-                <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" placeholder="e.g. 299 (min 5 pax)"></div>
+                ${_eventPriceFields(null)}
                 <div class="form-group"><label>Duration</label><input type="text" id="mkt-duration" class="form-control" placeholder="e.g. 2 hours"></div>
                 <div class="form-group"><label>Target Group</label><input type="text" id="mkt-target" class="form-control"></div>
                 <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" placeholder="e.g. KL, Online"></div>
@@ -1165,15 +1163,40 @@
         ]);
         // 汇集 briefing widget lives in the activities chunk (init-loaded by
         // script.js; ensure-load is a cheap no-op when already present).
-        if (type === 'events') {
-            Promise.resolve(window._loadChunkOnce ? window._loadChunkOnce('chunks/script-activities.min.js') : null)
-                .then(() => window.app.huijiInitSection && window.app.huijiInitSection({ eventId: null }))
-                .catch(() => {});
-        }
+        if (type === 'events') _initEventFormWidgets(null);
+    };
+
+    // Ticket price block of the event form. Big event (ticked) swaps the single
+    // price for ticket categories — editor built by the tickets chunk
+    // (app.ttInitEditor) into #tt-editor, read back by app.ttReadEditor on save.
+    const _eventPriceFields = (item) => {
+        const big = !!(item && item.is_big_event);
+        return `
+                <div class="form-group"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="mkt-big-event" ${big ? 'checked' : ''} onchange="app.ttToggleBig(this.checked)"> Big event — several ticket categories (VVIP, VIP, Normal…)</label></div>
+                <div id="mkt-normal-prices" ${big ? 'style="display:none;"' : ''}>
+                    <div class="form-group"><label>Ticket Price</label><input type="number" id="mkt-price" class="form-control" value="${item ? (item.ticket_price || 0) : 0}"></div>
+                    <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" value="${escapeHtml((item && item.early_bird_price) || '')}" placeholder="e.g. 199"></div>
+                    <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" value="${escapeHtml((item && item.group_purchase_price) || '')}" placeholder="e.g. 299 (min 5 pax)"></div>
+                </div>
+                <div id="tt-editor" ${big ? '' : 'style="display:none;"'}><div style="color:var(--gray-400);font-size:13px;">Loading ticket categories…</div></div>`;
+    };
+    // The event form's lazy widgets: 汇集 briefing (activities chunk) and ticket
+    // categories (tickets chunk).
+    const _initEventFormWidgets = (item) => {
+        const load = (src) => Promise.resolve(window._loadChunk ? window._loadChunk(src) : null);
+        load('chunks/script-activities.min.js')
+            .then(() => window.app.huijiInitSection && window.app.huijiInitSection({ eventId: item ? item.id : null }))
+            .catch(() => {});
+        load('chunks/script-tickets.min.js')
+            .then(() => window.app.ttInitEditor && window.app.ttInitEditor(item))
+            .catch(() => {});
     };
 
     const openMarketingListEditModal = async (id) => {
-        const item = await AppDataStore.getById(_state.cmlt, id);
+        // Events read fresh: a cached row from before the ticket columns existed
+        // would open "Big event" unticked and the save would switch it off.
+        const item = (_state.cmlt === 'events' ? await AppDataStore.getByIdFull('events', id) : null)
+            || await AppDataStore.getById(_state.cmlt, id);
         if (!item) return;
 
         let content = '';
@@ -1217,9 +1240,7 @@
                 <div id="huiji-owner-section" style="display:none;margin:12px 0;padding:12px;border:1px solid #fbcfe8;border-radius:8px;background:#fdf2f8;"></div>
                 <div class="form-group"><label>Title*</label><input type="text" id="mkt-title" class="form-control" value="${escapeHtml(item.event_title || item.title || '')}"></div>
                 <div class="form-group"><label>Market / Country</label><select id="mkt-event-country" class="form-control">${(UI.countries || []).map(c => `<option value="${c.code}" ${c.code === (item.country || window._crmUtils.cuHomeCountry()) ? 'selected' : ''}>${escapeHtml(c.name)} (${escapeHtml(c.symbol)})</option>`).join('')}</select></div>
-                <div class="form-group"><label>Ticket Price</label><input type="number" id="mkt-price" class="form-control" value="${item.ticket_price || 0}"></div>
-                <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" value="${escapeHtml(item.early_bird_price || '')}" placeholder="e.g. 199"></div>
-                <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" value="${escapeHtml(item.group_purchase_price || '')}" placeholder="e.g. 299 (min 5 pax)"></div>
+                ${_eventPriceFields(item)}
                 <div class="form-group"><label>Duration</label><input type="text" id="mkt-duration" class="form-control" value="${escapeHtml(item.duration || '')}"></div>
                 <div class="form-group"><label>Target Group</label><input type="text" id="mkt-target" class="form-control" value="${escapeHtml(item.target_group || '')}"></div>
                 <div class="form-group"><label>Location</label><input type="text" id="mkt-location" class="form-control" value="${escapeHtml(item.location || '')}" placeholder="e.g. KL, Online"></div>
@@ -1295,11 +1316,7 @@
         ]);
         // 汇集 briefing: creator gets the editable section prefilled; a manager
         // (L≤5) sees it read-only (RLS returns the row but blocks their writes).
-        if (type === 'events') {
-            Promise.resolve(window._loadChunkOnce ? window._loadChunkOnce('chunks/script-activities.min.js') : null)
-                .then(() => window.app.huijiInitSection && window.app.huijiInitSection({ eventId: id }))
-                .catch(() => {});
-        }
+        if (type === 'events') _initEventFormWidgets({ ...item, id });
     };
 
     const saveMarketingListItem = async (id = null) => {
@@ -1455,6 +1472,17 @@
             // activities chunk; absent widget → guard is a no-op).
             const _hv = window.app.huijiValidateBeforeSave ? window.app.huijiValidateBeforeSave() : { ok: true };
             if (!_hv.ok) return UI.toast.error(_hv.msg);
+
+            // Big event ticket categories (null = editor not loaded → leave the
+            // columns as they are). A big event's Ticket Price = its lowest paid
+            // category, so the list / invites / noticeboard still show a price.
+            const _tt = window.app.ttReadEditor ? window.app.ttReadEditor() : null;
+            if (_tt && _tt.error) return UI.toast.error(_tt.error);
+            if (_tt) {
+                data.is_big_event = _tt.is_big_event;
+                data.ticket_tiers = _tt.ticket_tiers;
+                if (_tt.is_big_event) data.ticket_price = _tt.from_price;
+            }
 
             const _posterFile = document.getElementById('mkt-poster')?.files[0];
             try {

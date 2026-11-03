@@ -6880,6 +6880,9 @@ Object.assign(window.app, {
         'toggleCoAgentSection', 'searchAgents', 'openCpsCreateEventModal',
         '_notifyHighlightSaved',
     ].forEach(n => S(n, A));
+    // Big event tickets (tickets chunk): the event-form tick (marketing chunk)
+    // and the attendee-row ticket chip (calendar chunk).
+    ['ttToggleBig', 'ttOpenAttendeeTicket'].forEach(n => S(n, 'chunks/script-tickets.min.js'));
     // Knowledge HQ Quick Capture (Ctrl+Shift+N + command palette).
     S('openCaptureModal', 'chunks/script-knowledge.min.js');
     // Customer 'Portal Link' header button (forms chunk).

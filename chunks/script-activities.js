@@ -5276,9 +5276,11 @@ My raw notes:
                     <span style="color:var(--gray-400);">Type:</span><span>${escapeHtml(ev.event_type || '-')}</span>
                     <span style="color:var(--gray-400);">Title:</span><span><strong>${escapeHtml(ev.event_title || ev.title || '-')}</strong></span>
                     <span style="color:var(--gray-400);">Duration:</span><span>${escapeHtml(ev.duration || '-')}</span>
+                    ${(ev.is_big_event && Array.isArray(ev.ticket_tiers) && ev.ticket_tiers.length) ? `
+                    <span style="color:var(--gray-400);">Tickets:</span><span>${ev.ticket_tiers.map(t => `${escapeHtml(t.name || '')} ${escapeHtml(UI.money(t.price, ev.country))}`).join(' · ')}</span>` : `
                     <span style="color:var(--gray-400);">Ticket Price:</span><span>${ev.ticket_price ? 'RM ' + escapeHtml(ev.ticket_price) : '-'}</span>
                     <span style="color:var(--gray-400);">Early Bird:</span><span>${escapeHtml(ev.early_bird_price || '-')}</span>
-                    <span style="color:var(--gray-400);">Group Price:</span><span>${escapeHtml(ev.group_purchase_price || '-')}</span>
+                    <span style="color:var(--gray-400);">Group Price:</span><span>${escapeHtml(ev.group_purchase_price || '-')}</span>`}
                     <span style="color:var(--gray-400);">Target Group:</span><span>${escapeHtml(ev.target_group || '-')}</span>
                     <span style="color:var(--gray-400);">Description:</span><span>${escapeHtml(ev.description || '-')}</span>
                 </div>
@@ -5636,7 +5638,22 @@ My raw notes:
         (window.app.showProspectDetail || (() => {}))(entityId);
     };
 
-    const showAddAttendeeSearch = (eventId, activityId) => {
+    // Big event ticket picker — chunks/script-tickets.js, loaded on demand.
+    // _ttResolve waits for the mount so a fast tap on Add can't skip the ticket;
+    // {} = not a big event (no ticket fields), null = stop the save.
+    let _ttMounting = Promise.resolve();
+    const _ttMount = (hostId, opts) => {
+        _ttMounting = window._loadChunk('chunks/script-tickets.min.js')
+            .then(() => window.app.ttMountPicker && window.app.ttMountPicker(hostId, opts))
+            .catch(e => console.warn('[tickets] picker', e));
+        return _ttMounting;
+    };
+    const _ttResolve = async () => {
+        await _ttMounting;
+        return window.app.ttResolvePick ? window.app.ttResolvePick() : {};
+    };
+
+    const showAddAttendeeSearch = (eventId, activityId, sessionDate) => {
         // Modal opens instantly. No preload of getAll('prospects') —
         // a 124-row prospects fetch with heavy jsonb columns
         // (closing_records_history / pre2025_purchases / feng_shui_audits)
@@ -5657,6 +5674,7 @@ My raw notes:
                 </div>
             </div>
             <div id="add-att-name" style="margin-top:8px;font-weight:600;color:var(--primary);min-height:20px;"></div>
+            <div id="tt-pick-att"></div>
             <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border,#e5e0d8);">
                 <div style="font-size:12px;color:var(--gray-400);margin-bottom:6px;">New person not in system?</div>
                 <button class="btn secondary btn-sm" onclick="app.showFTFAttendeeForm()" style="width:100%;">➕ New Friend (not yet CPS)</button>
@@ -5666,12 +5684,13 @@ My raw notes:
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Add', type: 'primary', action: '(async()=>{ await app.confirmAddAttendee(); })()' }
         ]);
+        _ttMount('tt-pick-att', { eventId, activityId, date: sessionDate });
     };
 
     // v6: Search & add an agent/consultant attendee.
     // Uses the users table filtered by consultant role (Level 7) or any agent level.
     // Writes to event_attendees with attendee_type='agent'.
-    const showAddConsultantSearch = async (eventId, activityId) => {
+    const showAddConsultantSearch = async (eventId, activityId, sessionDate) => {
         const users = await AppDataStore.getAll('users');
         // Filter to consultants + agents (Level 3-12). Exclude customers/referrers/inactive.
         const filtered = users.filter(u => {
@@ -5709,12 +5728,14 @@ My raw notes:
                 <div id="add-consult-results" style="border:1px solid var(--border,#e5e0d8);border-radius:4px;max-height:220px;overflow-y:auto;display:none;background:#fff;"></div>
             </div>
             <div id="add-consult-name" style="margin-top:8px;font-weight:600;color:var(--primary);min-height:20px;"></div>
+            <div id="tt-pick-consult"></div>
             <div style="margin-top:10px;font-size:11px;color:var(--gray-400);">Showing ${eligible.length} active agents/consultants</div>
         `;
         UI.showModal('Add Agent / Consultant', content, [
             { label: 'Cancel', type: 'secondary', action: 'UI.hideModal()' },
             { label: 'Add', type: 'primary', action: '(async()=>{ await app.confirmAddConsultant(); })()' }
         ]);
+        _ttMount('tt-pick-consult', { eventId, activityId, date: sessionDate });
     };
 
     const searchAddConsultant = (query) => {
@@ -5766,6 +5787,8 @@ My raw notes:
             }
         } catch (_) { /* intentional: dup-check is best-effort — proceed with create on probe failure */ }
 
+        const ticket = await _ttResolve();
+        if (!ticket) return;
         await AppDataStore.create('event_attendees', {
             event_id: eventId,
             activity_id: activityId,
@@ -5776,7 +5799,8 @@ My raw notes:
             attendance_status: 'Registered',
             added_by_agent_id: _state.cu?.id || null,
             added_by_name: _state.cu?.full_name || '',
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            ...ticket
         });
         UI.hideModal();
         await app.viewActivityDetails(activityId);
@@ -5968,10 +5992,14 @@ My raw notes:
         if (input) input.value = name;
     };
 
-    const showFTFAttendeeForm = () => {
+    const showFTFAttendeeForm = async () => {
         // Save event context, then open full Add New Prospect modal
         const eventId = window._addAttEventId;
         const activityId = window._addAttActivityId;
+        // Big event: the ticket is picked here, before the prospect form
+        // replaces this modal (and with it the picker).
+        const ticket = await _ttResolve();
+        if (!ticket) return;
 
         // One-time listener: after prospect is created, add as attendee.
         // { once: true } auto-detaches after a real prospectCreated fires; a
@@ -6007,7 +6035,8 @@ My raw notes:
                 attendance_status: 'Registered',
                 added_by_agent_id: _state.cu?.id || null,
                 added_by_name: _state.cu?.full_name || '',
-                created_at: new Date().toISOString()
+                created_at: new Date().toISOString(),
+                ...ticket
             });
             await app.viewActivityDetails(activityId);
             UI.toast.success((prospect.full_name || 'New prospect') + ' added as attendee');
@@ -6050,6 +6079,8 @@ My raw notes:
             }
         } catch (_) { /* intentional: dup-check best-effort — proceed with create on probe failure */ }
 
+        const ticket = await _ttResolve();
+        if (!ticket) return;
         await AppDataStore.create('event_attendees', {
             event_id: eventId,
             activity_id: activityId,
@@ -6063,7 +6094,8 @@ My raw notes:
             attendance_status: 'Registered',
             added_by_agent_id: _state.cu?.id || null,
             added_by_name: _state.cu?.full_name || '',
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            ...ticket
         });
         UI.hideModal();
         await app.viewActivityDetails(activityId);
