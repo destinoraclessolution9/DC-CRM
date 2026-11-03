@@ -46,6 +46,10 @@ function Poster({ e }) {
 }
 
 function PriceBadge({ e }) {
+    // Big event: the chunk pre-formats its lowest client price (_ticketFrom).
+    if (e._ticketFrom) {
+        return <div className="nb-price-badge">From {e._ticketFrom}{e._ticketEarly ? ' · 早鸟' : ''}</div>;
+    }
     if (e.ticket_price && parseFloat(e.ticket_price) > 0) {
         return <div className="nb-price-badge">RM {parseFloat(e.ticket_price).toFixed(0)}{e.early_bird_price ? ` · 早鸟 RM ${e.early_bird_price}` : ''}</div>;
     }

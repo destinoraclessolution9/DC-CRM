@@ -527,6 +527,28 @@ window.UI = (() => {
         formatCurrency(n, { ...opts, currency: currencyForCountry(country) });
     const moneyCompact = (n, country) =>
         formatCompact(n, { currency: currencyForCountry(country) });
+    // A big event's ticket categories as CLIENTS see them (invites, noticeboard):
+    // agents-only categories left out, early bird while it runs (see
+    // chunks/script-tickets.js). null = not a big event.
+    //   { from: 388, list: 'VVIP RM 2,888 · Normal RM 388', early: 'VVIP RM 2,388 (till 30 Nov)' }
+    const eventTickets = (ev, day) => {
+        let tiers = ev && ev.is_big_event ? ev.ticket_tiers : null;
+        if (typeof tiers === 'string') { try { tiers = JSON.parse(tiers); } catch (_) { tiers = null; } }
+        const pub = Array.isArray(tiers) ? tiers.filter(t => t && String(t.name || '').trim() && !t.agent_only) : [];
+        if (!pub.length) return null;
+        const n = new Date();
+        const d = day || `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+        const m = (v) => money(Number(v) || 0, ev.country);
+        const early = pub.filter(t => t.early_price != null && t.early_price !== '' && t.early_end && d <= String(t.early_end));
+        const till = (e) => { const x = new Date(e + 'T00:00:00'); return isNaN(x) ? e : x.toLocaleDateString('en-MY', { day: 'numeric', month: 'short' }); };
+        const oneEnd = new Set(early.map(t => t.early_end)).size === 1;
+        const now = pub.map(t => early.includes(t) ? Number(t.early_price) : Number(t.price)).map(v => v || 0).filter(v => v > 0);
+        return {
+            from: now.length ? Math.min(...now) : 0,
+            list: pub.map(t => `${t.name} ${m(t.price)}`).join(' · '),
+            early: early.map(t => `${t.name} ${m(t.early_price)}${oneEnd ? '' : ' till ' + till(t.early_end)}`).join(' · ') + (early.length && oneEnd ? ` (till ${till(early[0].early_end)})` : ''),
+        };
+    };
 
     // ── Vanilla UI kit: escaped string-builders that REUSE existing classes ──
     // Every interpolation routes through escapeHtml; onClick strings are the
@@ -775,6 +797,7 @@ window.UI = (() => {
         currencyForCountry,
         money,
         moneyCompact,
+        eventTickets,
         escapeHtml,
         escJsAttr,
         requireNumericId,

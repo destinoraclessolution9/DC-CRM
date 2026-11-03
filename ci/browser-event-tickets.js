@@ -88,7 +88,25 @@ const installStore = (users, sessionId, date) => {
         });
         return [...m].map(([k, n]) => ({ ticket_team: k.split('|')[0], ticket_tier: k.split('|')[1], taken: n }));
     };
-    const fake = { rpc: async (name, p) => { window.__rpc.push(name); return name === 'event_ticket_counts' ? { data: counts(p), error: null } : { data: [], error: null }; } };
+    // event_ticket_revenue: same grouping as the SQL function (p_date null = all dates).
+    const revenue = (p) => {
+        const ids = new Set(db.activities.filter(a => String(a.event_id) === String(p.p_event) && (p.p_date == null || a.activity_date === p.p_date)).map(a => String(a.id)));
+        const m = new Map();
+        db.event_attendees.forEach(a => {
+            if (!a.ticket_tier || !ids.has(String(a.activity_id)) || String(a.event_id) !== String(p.p_event)) return;
+            const r = m.get(a.ticket_tier) || { ticket_tier: a.ticket_tier, taken: 0, amount: 0, paid_count: 0, paid_amount: 0 };
+            r.taken++; r.amount += Number(a.ticket_price) || 0;
+            if (a.paid) { r.paid_count++; r.paid_amount += Number(a.ticket_price) || 0; }
+            m.set(a.ticket_tier, r);
+        });
+        return [...m.values()];
+    };
+    const fake = { rpc: async (name, p) => {
+        window.__rpc.push(name);
+        if (name === 'event_ticket_counts') return { data: counts(p), error: null };
+        if (name === 'event_ticket_revenue') return { data: revenue(p), error: null };
+        return { data: [], error: null };
+    } };
     const real = window.supabase;
     window.supabase = new Proxy(real || {}, { get: (o, k) => (k === 'rpc' ? fake.rpc : o[k]) });
 };
@@ -132,11 +150,11 @@ async function main() {
             return !!b;
         }, label),
         pickTier: (name) => page.evaluate((n) => {
-            const opt = [...document.querySelectorAll('.tt-opt')].find(o => o.querySelector('.tt-opt-name')?.textContent.trim() === n);
+            const opt = [...document.querySelectorAll('.tt-opt')].find(o => o.querySelector('.tt-opt-name')?.firstChild?.textContent.trim() === n);
             if (opt) opt.querySelector('input').click();
             return !!opt;
         }, name),
-        optText: (name) => page.evaluate((n) => [...document.querySelectorAll('.tt-opt')].find(o => o.querySelector('.tt-opt-name')?.textContent.trim() === n)?.innerText.replace(/\s+/g, ' ') || '', name),
+        optText: (name) => page.evaluate((n) => [...document.querySelectorAll('.tt-opt')].find(o => o.querySelector('.tt-opt-name')?.firstChild?.textContent.trim() === n)?.innerText.replace(/\s+/g, ' ') || '', name),
     });
 
     try {
@@ -167,6 +185,8 @@ async function main() {
         await add('+ VVIP'); await add('+ VIP'); await add('+ Normal'); await add('+ Agent (FOC)');
         const teams = await page.evaluate(() => [...document.querySelectorAll('.tt-card')[0].querySelectorAll('.tt-seats label')].map(l => l.firstChild.textContent.trim()));
         check('seats per team: Team A, Team B, No team', JSON.stringify(teams) === JSON.stringify(['Team A', 'Team B', 'No team']), teams);
+        const ao = await page.evaluate(() => [0, 1, 2, 3].map(i => document.getElementById('tt-ao-' + i).checked));
+        check('Agent category starts as agents-only, others not', JSON.stringify(ao) === JSON.stringify([false, false, false, true]), ao);
         check('VVIP button gone once added', !(await page.evaluate(() => [...document.querySelectorAll('#tt-editor .tt-add button')].some(b => b.textContent.trim() === '+ VVIP'))));
         await page.evaluate(() => {
             const set = (id, v) => { const el = document.getElementById(id); el.value = v; };
@@ -197,6 +217,7 @@ async function main() {
         const vvip = ev && ev.ticket_tiers[0];
         check('VVIP price + early bird + seats per team', vvip && vvip.price === 2888 && vvip.early_price === 2388 && vvip.early_end === '2099-12-31'
             && vvip.seats['Team A'] === 2 && vvip.seats['Team B'] === 3 && !('_none' in vvip.seats), vvip);
+        check('agents-only saved on Agent (FOC) only', ev && ev.ticket_tiers.map(t => !!t.agent_only).join() === 'false,false,false,true', ev && ev.ticket_tiers.map(t => t.agent_only));
         check('Normal has no limit', ev && Object.keys(ev.ticket_tiers[2].seats).length === 0, ev && ev.ticket_tiers[2]);
         check('Ticket Price = lowest paid category', ev && ev.ticket_price === 388, ev && ev.ticket_price);
         const EID = ev ? ev.id : 0;
@@ -222,6 +243,7 @@ async function main() {
         await page.evaluate((eid, s, d) => window.app.showAddAttendeeSearch(eid, s, d), EID, SESSION, DATE);
         await page.waitForFunction(() => document.querySelectorAll('.tt-opt').length === 4, { timeout: 8000 });
         check('picker lists the 4 categories', true);
+        check('agents-only category is tagged in the picker', /agents only/.test(await h.optText('Agent (FOC)')), await h.optText('Agent (FOC)'));
         check('counts are for her team', (await page.evaluate(() => document.querySelector('.tt-pick-for')?.textContent || '')).includes('Team A'));
         const vvipOpt = await h.optText('VVIP');
         check('VVIP: early-bird price, struck normal price, 2 of 2 left', /RM 2,388/.test(vvipOpt) && /RM 2,888/.test(vvipOpt) && /early bird/.test(vvipOpt) && /2 of 2 left/.test(vvipOpt), vvipOpt);
@@ -327,6 +349,14 @@ async function main() {
         await sleep(300);
         check('keeping your own full category needs no pop-up', !(await page.evaluate(() => !!document.getElementById('tt-full-pop'))) && (await page.evaluate(() => window.__toasts)).some(t => /Ticket saved/.test(t)));
 
+        console.log('\nRevenue (admin)');
+        // Tan Ah Kow has paid; a second date of the same event sells one VIP.
+        await page.evaluate(async (eid, a1) => {
+            await window.app.toggleAttendeePaid(a1, true);
+            window.__db.activities.push({ id: 702, activity_type: 'EVENT', event_id: eid, activity_date: '2026-12-21', lead_agent_id: 1, visibility: 'open' });
+            window.__db.event_attendees.push({ id: 1991, event_id: eid, activity_id: 702, attendee_id: 504, entity_id: 504, entity_name: 'Chan Bee', attendee_type: 'prospect', added_by_agent_id: 4, ticket_tier: window.__db.events[0].ticket_tiers[1].key, ticket_tier_name: 'VIP', ticket_price: 1288, ticket_team: 'Team B' });
+        }, EID, a1.id);
+
         console.log('\nAttendee list — admin');
         await login(page, USERS.admin);
         await page.evaluate(async (s) => { await window.app.viewActivityDetails(s); }, SESSION);
@@ -337,6 +367,13 @@ async function main() {
         check('Team A row: VVIP 3/2 · 1 over, VIP 1/1, Agent 1/20', rowA[1] === '3/2 · 1 over' && rowA[2] === '1/1' && rowA[4] === '1/20', rowA);
         const rowB = table.find(r => r[0] === 'Team B') || [];
         check('Team B row: VVIP 0/3', rowB[1] === '0/3', rowB);
+        const sales = table.find(r => r[0] === 'Sales') || [];
+        const paidRow = table.find(r => r[0] === 'Paid') || [];
+        check('Sales per category', JSON.stringify(sales) === JSON.stringify(['Sales', 'RM 7,164', 'RM 1,288', 'RM 388', 'RM 0']), sales);
+        check('Paid per category', JSON.stringify(paidRow) === JSON.stringify(['Paid', 'RM 2,388', 'RM 0', 'RM 0', 'RM 0']), paidRow);
+        const revText = await page.evaluate(() => [...document.querySelectorAll('.tt-rev-line')].map(l => l.textContent.replace(/\s+/g, ' ').trim()));
+        check('this date total: sales / paid / unpaid', revText[0] === 'This date: Sales RM 8,840 · Paid RM 2,388 · Unpaid RM 6,452', revText);
+        check('whole event total adds the other date', revText[1] === 'Whole event (all dates): Sales RM 10,128 · Paid RM 2,388 · Unpaid RM 7,740', revText);
         await page.evaluate(() => document.querySelector('.tt-sum-table')?.scrollIntoView({ block: 'center' }));
         await h.shot('5-attendee-list-admin');
 
@@ -355,6 +392,55 @@ async function main() {
         check('team selector lists every team', JSON.stringify(sel) === JSON.stringify(['Team A', 'Team B', 'No team']), sel);
         await page.evaluate(() => window.app.ttPickTeam('Team A'));
         check('switching team switches the counts', /3 of 2 · 1 over/.test(await h.optText('VVIP')), await h.optText('VVIP'));
+
+        console.log('\nClient prices — agents-only left out');
+        const tk = await page.evaluate(() => window.UI.eventTickets({ is_big_event: true, country: 'MY', ticket_tiers: [
+            { key: 'a', name: 'VVIP', price: 2888, early_price: 2388, early_end: '2099-12-31' },
+            { key: 'b', name: 'Agent (Paid)', price: 100, agent_only: true },
+            { key: 'c', name: 'Normal', price: 388 } ] }));
+        check('UI.eventTickets: list, early bird, from', tk && tk.list === 'VVIP RM 2,888 · Normal RM 388' && tk.early === 'VVIP RM 2,388 (till 31 Dec)' && tk.from === 388, tk);
+        check('UI.eventTickets: normal event → null', (await page.evaluate(() => window.UI.eventTickets({ is_big_event: false, ticket_price: 50 }))) === null);
+        await page.evaluate(async (s) => { window.UI.hideModal(); await window.app.sendDescriptionInvite(s); }, SESSION);
+        await sleep(500);
+        const invite = (await page.evaluate(() => document.querySelector('#global-modal-overlay textarea')?.value || '')).replace(/\s+/g, ' ');
+        check('WhatsApp invite lists client tickets', invite.includes('Tickets: VVIP RM 2,888 · VIP RM 1,288 · Normal RM 388'), invite.slice(0, 400));
+        check('WhatsApp invite has the early bird line', invite.includes('Early bird: VVIP RM 2,388 (till 31 Dec)'), invite.slice(0, 400));
+        check('no agent ticket in the invite', !/Agent/.test(invite), invite.slice(0, 400));
+        await h.shot('6-whatsapp-invite');
+        await page.evaluate(async (eid) => {
+            window.UI.hideModal();
+            Object.assign(window.__db.events[0], { date: '2026-12-20', published_to_noticeboard: true });
+            await window._loadChunk('chunks/script-performance.min.js');
+            await window.app.openNoticeboardDetail(eid);
+        }, EID);
+        await sleep(500);
+        const nbd = (await h.modalText()).replace(/\s+/g, ' ');
+        check('noticeboard detail lists client tickets + early bird', nbd.includes('VVIP RM 2,888 · VIP RM 1,288 · Normal RM 388') && nbd.includes('Early bird: VVIP RM 2,388') && !/Agent/.test(nbd), nbd.slice(0, 300));
+        await page.evaluate(async () => {
+            window.UI.hideModal();
+            let box = document.getElementById('tt-test-view');
+            if (!box) { box = document.createElement('div'); box.id = 'tt-test-view'; box.style.cssText = 'position:fixed;inset:0;z-index:50;background:#fff;overflow:auto;'; document.body.appendChild(box); }
+            await window.app.showNoticeboardView(box);
+        });
+        await page.waitForFunction(() => !!document.querySelector('#tt-test-view .nb-price-badge'), { timeout: 8000 })
+            .catch(() => {});
+        const badge = await page.evaluate(() => [...document.querySelectorAll('#tt-test-view .nb-price-badge')].map(b => b.textContent.trim()));
+        check('noticeboard card: From RM 388 · 早鸟', badge.includes('From RM 388 · 早鸟'), badge);
+        await page.evaluate(() => document.querySelector('#tt-test-view .nb-price-badge')?.scrollIntoView({ block: 'center' }));
+        await h.shot('7-noticeboard-card');
+        await page.evaluate(async () => {
+            const box = document.getElementById('tt-test-view');
+            window._appState.cmlt = 'events';
+            // The save earlier already drew the list into the main page — one #ml-react-root only.
+            document.querySelectorAll('#ml-react-root').forEach(e => e.remove());
+            await window.app.showMarketingListsView(box);
+        });
+        await page.waitForFunction(() => /From RM 388/.test(document.getElementById('tt-test-view')?.innerText || ''), { timeout: 8000 })
+            .catch(() => {});
+        const ml = (await page.evaluate(() => document.getElementById('tt-test-view').innerText)).replace(/\s+/g, ' ');
+        check('Marketing list: From RM 388 + every category', ml.includes('From RM 388') && ml.includes('VVIP · VIP · Normal · Agent (FOC)') && ml.includes('per category'), ml.slice(0, 300));
+        await h.shot('8-marketing-list');
+        await page.evaluate(() => document.getElementById('tt-test-view')?.remove());
 
         console.log('\nA normal event shows no picker');
         await page.evaluate(() => {

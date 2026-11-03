@@ -11686,6 +11686,11 @@ html, body {
 .tt-seats-head small { font-weight: 400; color: var(--gray-500); }
 .tt-link { border: none; background: none; padding: 0; color: var(--primary); font-size: 12px; text-decoration: underline; cursor: pointer; white-space: nowrap; }
 .tt-empty { font-size: 12px; color: var(--gray-500); padding: 6px 0 10px; }
+.tt-ao { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; font-size: 12px; font-weight: 400; color: var(--gray-600, #4b5563); cursor: pointer; }
+.tt-ao input { width: 15px; height: 15px; margin: 0; flex: none; }
+.tt-opt-tag { margin-left: 4px; padding: 0 6px; border-radius: 8px; background: #E0F2FE; color: #075985; font-size: 10px; font-weight: 500; }
+.tt-sum-table tr.tt-rev td { font-weight: 500; color: var(--gray-600, #4b5563); border-bottom: none; padding-top: 2px; padding-bottom: 2px; }
+.tt-rev-line { font-size: 12px; margin-top: 6px; }
 .tt-add { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .tt-pick { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border, #e5e0d8); }

@@ -921,6 +921,11 @@ const showNoticeboardView = async (container) => {
     } else {
         postered.forEach(e => { e._posterSigned = e.poster_url; });
     }
+    // Big events: the card badge reads "From RM 388" (client categories only).
+    visible.forEach(e => {
+        const tk = UI.eventTickets ? UI.eventTickets(e) : null;
+        if (tk && tk.from > 0) { e._ticketFrom = UI.money(tk.from, e.country); e._ticketEarly = !!tk.early; }
+    });
 
     // React island (default-on) renders the cards from the prepared (filtered,
     // sorted, poster-signed) `visible` events. If the React bundle is
@@ -956,6 +961,7 @@ const openNoticeboardDetail = async (eventId) => {
     const time = (e.start_time && e.end_time) ? `${e.start_time} – ${e.end_time}` : (e.start_time || e.end_time || '');
     const evTitle = e.title || e.event_title || 'Event Details';
     const evDate  = e.date  || e.event_date  || null;
+    const _tickets = UI.eventTickets ? UI.eventTickets(e) : null; // big event: client categories
 
     const content = `
         <div style="max-width:560px;">
@@ -968,7 +974,9 @@ const openNoticeboardDetail = async (eventId) => {
                 ${time ? `<div><i class="fas fa-clock" style="color:#be185d;width:20px;"></i> ${esc(time)}</div>` : ''}
                 ${e.location ? `<div><i class="fas fa-map-marker-alt" style="color:#be185d;width:20px;"></i> ${esc(e.location)}</div>` : ''}
                 ${e.capacity ? `<div><i class="fas fa-users" style="color:#be185d;width:20px;"></i> Capacity: ${esc(e.capacity)}</div>` : ''}
-                ${e.ticket_price ? `<div><i class="fas fa-tag" style="color:#be185d;width:20px;"></i> RM ${esc(e.ticket_price)}</div>` : ''}
+                ${_tickets
+                    ? `<div><i class="fas fa-tag" style="color:#be185d;width:20px;"></i> ${esc(_tickets.list)}</div>${_tickets.early ? `<div><i class="fas fa-clock" style="color:#be185d;width:20px;"></i> 早鸟 · Early bird: ${esc(_tickets.early)}</div>` : ''}`
+                    : (e.ticket_price ? `<div><i class="fas fa-tag" style="color:#be185d;width:20px;"></i> RM ${esc(e.ticket_price)}</div>` : '')}
             </div>
             ${e.description ? `<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--gray-200,#e5e7eb);color:var(--gray-700,#374151);font-size:0.95rem;line-height:1.6;white-space:pre-wrap;">${esc(e.description)}</div>` : ''}
             <div id="huiji-nb-brief-${e.id}" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--gray-200,#e5e7eb);"></div>

@@ -136,6 +136,7 @@
                 price: _ttNum(val(`tt-p-${i}`)) || 0,
                 early_price: early,
                 early_end: early != null ? (val(`tt-ee-${i}`) || null) : null,
+                agent_only: !!(document.getElementById(`tt-ao-${i}`) || {}).checked,
                 seats,
             };
         });
@@ -156,6 +157,7 @@
                     <label>Early-bird price<input type="number" min="0" id="tt-ep-${i}" class="form-control" value="${t.early_price != null ? esc(String(t.early_price)) : ''}" placeholder="optional"></label>
                     <label>Early bird ends<input type="date" id="tt-ee-${i}" class="form-control" value="${esc(t.early_end || '')}"></label>
                 </div>
+                <label class="tt-ao"><input type="checkbox" id="tt-ao-${i}" ${t.agent_only ? 'checked' : ''}> Agents only — hidden from client invites &amp; the noticeboard</label>
                 <div class="tt-seats-head">
                     <span>Seats per team <small>(each date · blank = no limit)</small></span>
                     <button type="button" class="tt-link" onclick="app.ttEdFillSeats(${i})">Same for all teams</button>
@@ -195,7 +197,7 @@
         if (!_ttEd) return;
         _ttEdSync();
         const name = presetIdx >= 0 ? (TT_PRESETS[presetIdx] || '') : '';
-        _ttEd.tiers.push({ key: _ttNewKey(), name, price: /FOC/.test(name) ? 0 : null, early_price: null, early_end: null, seats: {} });
+        _ttEd.tiers.push({ key: _ttNewKey(), name, price: /FOC/.test(name) ? 0 : null, early_price: null, early_end: null, agent_only: /^Agent/.test(name), seats: {} });
         _ttEdRender();
         if (!name) { const el = document.getElementById(`tt-n-${_ttEd.tiers.length - 1}`); if (el) el.focus(); }
     };
@@ -236,8 +238,10 @@
                 if (t.early_price != null && !t.early_end) return { error: `${t.name}: give the early-bird price an end date` };
             }
         }
-        // Lowest paid price — what the list, invites and noticeboard show as the price.
-        const paid = tiers.map(t => Number(t.price) || 0).filter(p => p > 0);
+        // Lowest paid CLIENT price (agents-only left out) — what the list, invites
+        // and noticeboard show as the price.
+        const pub = tiers.filter(t => !t.agent_only);
+        const paid = (pub.length ? pub : tiers).map(t => Number(t.price) || 0).filter(p => p > 0);
         return { is_big_event: !!cb.checked, ticket_tiers: tiers, from_price: paid.length ? Math.min(...paid) : 0 };
     };
 
@@ -264,7 +268,7 @@
             return `
                 <label class="tt-opt${full ? ' is-full' : ''}${p.tierKey === t.key ? ' is-on' : ''}">
                     <input type="radio" name="tt-pick" value="${esc(t.key)}" ${p.tierKey === t.key ? 'checked' : ''} onchange="app.ttPickTier(this.value)">
-                    <span class="tt-opt-name">${esc(t.name)}</span>
+                    <span class="tt-opt-name">${esc(t.name)}${t.agent_only ? ' <span class="tt-opt-tag">agents only</span>' : ''}</span>
                     <span class="tt-opt-price">${priceHtml}</span>
                     <span class="tt-opt-left">${esc(_ttLeftText(taken, seats))}</span>
                 </label>`;
@@ -374,8 +378,26 @@
             ? `<button type="button" class="tt-chip" title="Change ticket" onclick="${open}">🎟 ${esc(name)}${esc(price)}</button>`
             : `<span class="tt-chip">🎟 ${esc(name)}</span>`;
     };
+    // Ticket sales per category (event_ticket_revenue — admin / marketing only;
+    // date null = the whole event). Map tierKey → { amount, paid }; null on error.
+    const _ttFetchRevenue = async (eventId, date) => {
+        try {
+            const sb = window.supabase || window.supabaseClient;
+            const { data, error } = await sb.rpc('event_ticket_revenue', { p_event: Number(eventId), p_date: date || null });
+            if (error) throw error;
+            const m = new Map();
+            (data || []).forEach(r => m.set(r.ticket_tier, { amount: Number(r.amount) || 0, paid: Number(r.paid_amount) || 0 }));
+            return m;
+        } catch (_) { return null; }
+    };
+    const _ttRevTotal = (rev) => {
+        let amount = 0, paid = 0;
+        if (rev) rev.forEach(v => { amount += v.amount; paid += v.paid; });
+        return { amount, paid };
+    };
     // Seat summary for one session, filled after the modal opens. Agents see
-    // their own team's line; admin / marketing see a team × category table.
+    // their own team's line; admin / marketing see a team × category table
+    // with sales + paid per category.
     const ttFillSessionSummary = async (hostId, ev, date) => {
         const host = document.getElementById(hostId);
         const tiers = _ttTiers(ev);
@@ -398,7 +420,8 @@
             }).join('')}</div>`;
             return;
         }
-        const teams = await _ttTeamKeys();
+        const [teams, revDay, revAll] = await Promise.all([_ttTeamKeys(), _ttFetchRevenue(ev.id, day), _ttFetchRevenue(ev.id, null)]);
+        if (!document.getElementById(hostId)) return;
         counts.forEach((_, k) => { const tk = k.split('|')[0]; if (!teams.includes(tk)) teams.push(tk); });
         const rows = teams.filter(tk => tiers.some(t => _ttSeats(t, tk) != null || _ttTaken(counts, tk, t.key) > 0));
         const total = (t) => {
@@ -415,9 +438,19 @@
                         ${rows.map(tk => `<tr><td>${esc(_ttTeamLabel(tk))}</td>${tiers.map(t => { const c = cell(tk, t); return `<td class="${c.cls.trim()}">${esc(c.txt)}</td>`; }).join('')}</tr>`).join('')
                             || `<tr><td colspan="${tiers.length + 1}" class="tt-sum-none">No tickets registered yet.</td></tr>`}
                     </tbody>
-                    <tfoot><tr><td>Total</td>${tiers.map(t => `<td>${esc(total(t))}</td>`).join('')}</tr></tfoot>
+                    <tfoot>
+                        <tr><td>Total</td>${tiers.map(t => `<td>${esc(total(t))}</td>`).join('')}</tr>
+                        ${revDay ? `<tr class="tt-rev"><td>Sales</td>${tiers.map(t => `<td>${esc(_ttMoney((revDay.get(t.key) || {}).amount || 0, ev))}</td>`).join('')}</tr>
+                        <tr class="tt-rev"><td>Paid</td>${tiers.map(t => `<td>${esc(_ttMoney((revDay.get(t.key) || {}).paid || 0, ev))}</td>`).join('')}</tr>` : ''}
+                    </tfoot>
                 </table>
-                <div class="tt-sum-note">Taken / seats per team · a number alone = no limit</div>
+                ${revDay ? (() => {
+                    const d = _ttRevTotal(revDay), a = _ttRevTotal(revAll);
+                    const line = (x) => `Sales ${_ttMoney(x.amount, ev)} · Paid ${_ttMoney(x.paid, ev)} · Unpaid ${_ttMoney(x.amount - x.paid, ev)}`;
+                    return `<div class="tt-rev-line"><strong>This date:</strong> ${esc(line(d))}</div>`
+                        + (revAll && (a.amount !== d.amount || a.paid !== d.paid) ? `<div class="tt-rev-line"><strong>Whole event (all dates):</strong> ${esc(line(a))}</div>` : '');
+                })() : ''}
+                <div class="tt-sum-note">Taken / seats per team · a number alone = no limit · sales = ticket prices booked, paid = Paid ticked</div>
             </div>`;
     };
     // Pick or change one attendee's ticket from the attendee list.

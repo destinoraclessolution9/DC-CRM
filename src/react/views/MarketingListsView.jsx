@@ -124,9 +124,11 @@ function EventsTable({ rows }) {
                             <td>{cats.length ? cats.map((c, i) => <span key={i} style={catPill}>{c}</span>) : <span className="text-muted">-</span>}</td>
                             <ImageCell url={item.poster_url} label="Poster" emoji="🖼️" emptyTitle="No poster" />
                             <td><strong>{item.event_title || item.title || ''}</strong><br /><small className="text-muted">{item.description || ''}</small></td>
-                            <td>{item.ticket_price || '-'}</td>
-                            <td>{item.early_bird_price || '-'}</td>
-                            <td>{item.group_purchase_price || '-'}</td>
+                            {item._bigPrice
+                                ? <td>{item._bigPrice}<br /><small className="text-muted">🎟 {item._bigTiers}</small></td>
+                                : <td>{item.ticket_price || '-'}</td>}
+                            <td>{item._bigPrice ? 'per category' : (item.early_bird_price || '-')}</td>
+                            <td>{item._bigPrice ? '-' : (item.group_purchase_price || '-')}</td>
                             <td>{item.duration || '-'}</td>
                             <td>{item.target_group || '-'}</td>
                             <td>{item.location || '-'}</td>

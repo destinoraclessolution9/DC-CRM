@@ -331,6 +331,15 @@
         `;
     };
 
+    // Events list price cell for a big event: "From RM 388" (lowest client
+    // price) + every category name. {} for a normal event.
+    const _bigEventPrice = (item) => {
+        const tk = UI.eventTickets ? UI.eventTickets(item) : null;
+        if (!tk) return {};
+        const names = (Array.isArray(item.ticket_tiers) ? item.ticket_tiers : []).map(t => t && t.name).filter(Boolean);
+        return { _bigPrice: 'From ' + UI.money(tk.from, item.country), _bigTiers: names.join(' · ') };
+    };
+
     const showMarketingListsView = async (container) => {
         // React island — renders the shell + the 5 master-data tables; the two
         // complex tabs (promotions, special_programs) are passed through as the
@@ -347,7 +356,7 @@
                         data = data.filter(v => { const k = (v.name || '') + '|' + (v.location || ''); if (seen.has(k)) return false; seen.add(k); return true; });
                         data.sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
                     } else if (tab === 'events') {
-                        data = data.map(it => ({ ...it, _cats: parseEventCategories(it.categories) }));
+                        data = data.map(it => ({ ...it, _cats: parseEventCategories(it.categories), ..._bigEventPrice(it) }));
                     }
                     rows = data;
                     // Products render as grouped/collapsible HTML (one builder for both paths).
@@ -680,9 +689,12 @@
                                         : `<span style="color:var(--gray-300);font-size:18px;" title="No poster">🖼️</span>`}
                                 </td>
                                 <td><strong>${escapeHtml(item.event_title || item.title || '')}</strong> <span style="font-size:10px;color:var(--gray-400);">${escapeHtml(UI.countryByCode(item.country).code)}</span><br><small class="text-muted">${escapeHtml(item.description || '')}</small></td>
-                                <td>${item.ticket_price ? UI.money(item.ticket_price, item.country) : '-'}</td>
-                                <td>${escapeHtml(item.early_bird_price || '-')}</td>
-                                <td>${escapeHtml(item.group_purchase_price || '-')}</td>
+                                ${(() => {
+                                    const big = _bigEventPrice(item);
+                                    return big._bigPrice
+                                        ? `<td>${escapeHtml(big._bigPrice)}<br><small class="text-muted">🎟 ${escapeHtml(big._bigTiers)}</small></td><td>per category</td><td>-</td>`
+                                        : `<td>${item.ticket_price ? UI.money(item.ticket_price, item.country) : '-'}</td><td>${escapeHtml(item.early_bird_price || '-')}</td><td>${escapeHtml(item.group_purchase_price || '-')}</td>`;
+                                })()}
                                 <td>${escapeHtml(item.duration || '-')}</td>
                                 <td>${escapeHtml(item.target_group || '-')}</td>
                                 <td>${escapeHtml(item.location || '-')}</td>

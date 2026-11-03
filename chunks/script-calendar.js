@@ -2031,6 +2031,14 @@
     // caption (needs the events row + matching activity for date/time/venue); everything
     // else uses the stored message text. Extracted so the render-time prefetch and the
     // click-time send share ONE source of truth.
+    // Ticket line(s) for a WhatsApp invite: a big event lists its client
+    // categories (+ early bird while it runs), otherwise the single price.
+    const _inviteTicketLines = (event) => {
+        const T = '\u{1F39F}️', ALARM = '⏰';
+        const tk = UI.eventTickets ? UI.eventTickets(event) : null;
+        if (tk) return [`${T} Tickets: ${tk.list}`].concat(tk.early ? [`${ALARM} Early bird: ${tk.early}`] : []);
+        return event?.ticket_price ? [`${T} Ticket Price: RM ${event.ticket_price}`] : [];
+    };
     const _buildFollowUpBody = async (draft) => {
         // appointment_reminder + voucher_unredeemed overload event_id to carry an activity /
         // attachment id (dedup key), NOT a real events row. Their message_text is already a
@@ -2055,14 +2063,13 @@
         const time = startTRaw && endTRaw ? `${startTRaw} - ${endTRaw}` : (startTRaw || '');
         const venue = activity?.venue || activity?.location_address || event?.location || '';
         const description = event?.description || '';
-        const ticketPrice = event?.ticket_price ? `RM ${event.ticket_price}` : '';
         // Unicode escapes — literal emoji bytes get mangled by Windows clipboard round-trips.
         const E = { sparkle: '✨', calendar: '\u{1F4C5}', clock: '\u{1F550}', pin: '\u{1F4CD}', ticket: '\u{1F39F}️' };
         const lines = [`${E.sparkle} *${title || 'You are invited!'}* ${E.sparkle}`, ''];
         if (date) lines.push(`${E.calendar} Date: ${date}`);
         if (time) lines.push(`${E.clock} Time: ${time}`);
         if (venue) lines.push(`${E.pin} Venue: ${venue}`);
-        if (ticketPrice) lines.push(`${E.ticket} Ticket Price: ${ticketPrice}`);
+        lines.push(..._inviteTicketLines(event));
         if (description) lines.push('', description);
         return lines.join('\n');
     };
@@ -3970,7 +3977,6 @@
         const time = (activity.start_time && activity.end_time) ? `${activity.start_time} - ${activity.end_time}` : (activity.start_time || '');
         const venue = activity.venue || activity.location_address || event?.location || '';
         const description = event?.description || activity.summary || '';
-        const ticketPrice = event?.ticket_price ? `RM ${event.ticket_price}` : '';
 
         // Use Unicode escapes so emojis survive any file-encoding mismatch
         const E = { sparkle: '\u2728', calendar: '\u{1F4C5}', clock: '\u{1F550}', pin: '\u{1F4CD}', ticket: '\u{1F39F}\uFE0F' };
@@ -3978,7 +3984,7 @@
         if (date) lines.push(`${E.calendar} Date: ${date}`);
         if (time) lines.push(`${E.clock} Time: ${time}`);
         if (venue) lines.push(`${E.pin} Venue: ${venue}`);
-        if (ticketPrice) lines.push(`${E.ticket} Ticket Price: ${ticketPrice}`);
+        lines.push(..._inviteTicketLines(event));
         if (description) lines.push('', description);
 
         const body = lines.join('\n');
