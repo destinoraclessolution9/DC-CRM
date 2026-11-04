@@ -6,7 +6,8 @@
 -- per agent and stay hidden from agents until started (then one push each),
 -- agents see / act on only their own rows, outsiders see nothing, a sale counts
 -- for ONE list (latest contact wins) and drops out when cancelled, the
--- contacted-often warning → "Add anyway". Test users + people are created here;
+-- contacted-often warning → "Add anyway", a list with contact steps deletes
+-- whole while the log itself stays locked. Test users + people are created here;
 -- one DO block that ALWAYS raises, so everything is rolled back.
 -- Result: NAME_LIST_RESULT {"pass","fail","failures"}
 do $$
@@ -245,6 +246,19 @@ begin
     v_r := public.name_list_add(v_list2, v_p[1], null, null, true);
     reset role;
     if not (v_r ->> 'ok')::boolean then v_pass := v_pass + 1; else v_fail := v_fail + 1; v_msgs := v_msgs || 'double add'::text; end if;
+
+    -- ── 11. a list with contact steps deletes whole; the log itself stays locked ──
+    begin
+        delete from public.name_lists where id = v_list;
+        if not exists (select 1 from public.name_list_steps where list_id = v_list)
+           and not exists (select 1 from public.name_list_rows where list_id = v_list)
+           and not exists (select 1 from public.name_list_versions where list_id = v_list)
+        then v_pass := v_pass + 1; else v_fail := v_fail + 1; v_msgs := v_msgs || 'list delete left rows'::text; end if;
+    exception when others then v_fail := v_fail + 1; v_msgs := v_msgs || ('list delete: ' || sqlerrm); end;
+    begin update public.name_list_steps set row_id = null where list_id = v_list2; v_fail := v_fail + 1; v_msgs := v_msgs || 'log row_id editable'::text;
+    exception when others then v_pass := v_pass + 1; end;
+    begin update public.name_list_steps set note = 'x' where list_id = v_list2; v_fail := v_fail + 1; v_msgs := v_msgs || 'log note editable'::text;
+    exception when others then v_pass := v_pass + 1; end;
 
     raise exception 'NAME_LIST_RESULT %', json_build_object('pass', v_pass, 'fail', v_fail, 'failures', v_msgs);
 end $$;

@@ -55,11 +55,11 @@ const installFakes = () => {
         freq_limit: 2, freq_days: 30,
         rows: [
             row({ id: 101, name: 'Alice Lee', grp: 'strong', fit: 85, contact_at: '2026-11-02T17:10:00Z', contact_via: 'whatsapp', reply: 'interested', reply_note: 'wants a visit', sale_amount: 3800, sale_date: '2026-11-03', sale_item: 'Power Ring' }),
-            row({ id: 102, name: 'Ben Tan', freq: 2, rank: 2 }),
+            row({ id: 102, name: 'Ben Tan', freq: 2, rank: 2, contact_at: '2026-11-03T02:00:00Z', contact_via: 'called' }),
             row({ id: 103, name: 'Cara Dnf', dni: true, rank: 3 }),
             row({ id: 104, name: 'Dan Extra', decision: 'pending', engine_picked: false, rank: 4 }),
             row({ id: 105, name: 'Eve Gone', decision: 'removed', decision_reason: 'not_fit', decision_note: 'moved overseas', decided_by_name: 'System Admin', rank: 5 }),
-            row({ id: 106, name: 'Fay Added', customer_id: 77, prospect_id: null, person_key: 'c:77', source: 'manual', added_by_name: 'System Admin', add_note: 'met at dinner', reasons: [], fit: null }),
+            row({ id: 106, name: 'Fay Added', customer_id: 77, prospect_id: null, person_key: 'c:77', source: 'manual', added_by_name: 'System Admin', add_note: 'met at dinner', reasons: [], fit: null, reply: 'interested', reply_at: '2026-11-03T03:00:00Z' }),
         ],
     });
     window.__calls = [];
@@ -209,7 +209,12 @@ async function main() {
         check('held back explained', dt.includes('2 asked not to be contacted') && dt.includes('1 paused after saying no'), dt.slice(0, 500));
         check('sections: on the list 4 · suggestions 1 · taken off 1', dt.includes('On the list (4)') && dt.includes('More suggestions (1)') && dt.includes('Taken off (1)'));
         const alice = await page.evaluate(() => document.getElementById('nl-row-101')?.innerText || '');
-        check('row: reasons, next step, scores', alice.includes('Recent CPS') && alice.includes('Share 风水 Feng Shui') && alice.includes('Fit 85'), alice);
+        check('row: reasons + scores; closed sale → no next step', alice.includes('Recent CPS') && alice.includes('Fit 85') && !alice.includes('➜'), alice);
+        const nextOf = (id) => page.evaluate((i) => document.querySelector(`#nl-row-${i} .nlp-next`)?.textContent || '', id);
+        check('next step: untouched row keeps the engine plan', (await nextOf(104)).includes('Share 风水 Feng Shui') && (await nextOf(104)).includes('Fits, not approached yet'), await nextOf(104));
+        check('next step: contacted, no reply → get their answer', (await nextOf(102)).includes('Get their answer') && !(await nextOf(102)).includes('not approached'), await nextOf(102));
+        check('next step: interested → book a meeting about the line', (await nextOf(106)).includes('Book a meeting about 风水 Feng Shui'), await nextOf(106));
+        check('next step: taken off → none', (await nextOf(105)) === '', await nextOf(105));
         check('row: progress — WhatsApp on the local day, interested + note, closed RM', alice.includes('💬 WhatsApp 3 Nov') && alice.includes('Interested') && alice.includes('wants a visit') && alice.includes('Closed RM 3,800'), alice);
         check('contacted-often warning', (await page.evaluate(() => document.getElementById('nl-row-102')?.innerText || '')).includes('contacted 2× in 30 days'));
         const cara = await page.evaluate(() => ({ t: document.getElementById('nl-row-103')?.innerText || '', btns: [...document.querySelectorAll('#nl-row-103 .inv-acts button')].map(b => b.textContent.trim()) }));

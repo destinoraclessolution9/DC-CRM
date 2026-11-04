@@ -494,8 +494,24 @@
         if (r.sale_amount != null) bits.push(`<span class="inv-st-ok">💰 Closed ${_rm(r.sale_amount)}</span>${r.sale_item ? ` <span class="inv-when">${esc(String(r.sale_item).slice(0, 40))}</span>` : ''}`);
         return bits.length ? `<div class="nlp-prog">${bits.join(' · ')}</div>` : '';
     };
+    // The engine's next step is a snapshot from when the list was made; once the
+    // agent has done something the row moves on from it (null = nothing to do).
+    const _nextStep = (r, d) => {
+        if (r.decision === 'removed' || r.sale_amount != null || r.dni || r.reply === 'stop') return null;
+        const l = (d && d.list) || {};
+        const topic = (l.focus_names || []).length === 1 ? l.focus_names[0] : (l.line_label || l.line || '');
+        const about = topic ? ` about ${topic}` : '';
+        if (r.reply === 'not_interested') return { step: 'Leave it for now', why: 'Said not interested' };
+        if (r.reply === 'not_now') return { step: 'Try again later', why: `Said not now${r.reply_at ? ' on ' + _d(r.reply_at) : ''}` };
+        if (r.met_at) return { step: `Follow up to close${about}`, why: `Met ${_d(r.met_at)}` };
+        if (r.reply === 'interested') return { step: `Book a meeting${about}`, why: 'Said interested' };
+        if (r.reply === 'no_reply') return { step: 'Try once more — a call this time', why: 'No reply yet' };
+        if (r.contact_at) return { step: 'Get their answer', why: 'then press Reply…' };
+        return r.next_step ? { step: r.next_step, why: r.next_step_why || '' } : null;
+    };
     const _rowHtml = (r, d, work) => {
         const id = Number(r.id);
+        const next = _nextStep(r, d);
         const profile = r.customer_id ? `app.showCustomerDetail(${Number(r.customer_id)})` : `app.showProspectDetail(${Number(r.prospect_id)})`;
         const warns = (r.warnings || []).map(w => NLP_WARN[w] || String(w).replace(/[_:]/g, ' '));
         if (Number(r.freq) >= Number(d.freq_limit || 2)) warns.unshift(`contacted ${Number(r.freq)}× in ${Number(d.freq_days || 30)} days — give them space`);
@@ -530,7 +546,7 @@
                     <div class="inv-name"><a href="javascript:void(0)" onclick="event.stopPropagation();${profile}">${esc(r.name || '—')}</a>${chips}</div>
                     ${r.add_note ? `<ul class="inv-why"><li class="inv-note">“${esc(r.add_note)}”</li></ul>` : ''}
                     ${(r.reasons || []).length ? `<ul class="inv-why">${_reasonsHtml(r)}</ul>` : (r.source === 'manual' ? '' : '<div class="inv-why-none">No reason recorded</div>')}
-                    ${r.next_step ? `<div class="nlp-next">➜ <b>${esc(r.next_step)}</b>${r.next_step_why ? ` <span class="inv-when">${esc(r.next_step_why)}</span>` : ''}</div>` : ''}
+                    ${next ? `<div class="nlp-next">➜ <b>${esc(next.step)}</b>${next.why ? ` <span class="inv-when">${esc(next.why)}</span>` : ''}</div>` : ''}
                     ${warns.length ? `<div class="inv-warn">⚠ ${esc(warns.join(' · '))}</div>` : ''}
                     ${removed}
                     ${_progressHtml(r)}
@@ -752,7 +768,7 @@
             r.name, r.customer_id ? 'Customer' : 'Prospect', r.agent_name || '',
             r.decision === 'selected' ? 'yes' : r.decision === 'removed' ? 'taken off' : 'suggested',
             r.fit ?? '', r.engagement ?? '', r.readiness ?? '',
-            (r.reasons || []).map(x => x.t).join('; '), r.next_step || '',
+            (r.reasons || []).map(x => x.t).join('; '), (_nextStep(r, d) || {}).step || '',
             r.contact_at ? `${NLP_STEP_LABEL[r.contact_via] || r.contact_via} ${_ymd(r.contact_at)}` : '',
             r.reply ? (NLP_STEP_LABEL[r.reply] || r.reply) : '', r.met_at || '', r.sale_amount ?? '',
         ]);
