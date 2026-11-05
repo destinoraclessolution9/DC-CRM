@@ -261,6 +261,11 @@ async function main() {
         await sleep(400);
         fb = await last('name_list_feedback');
         check('why-missed note saved, never takes off', fb && fb.args.p_row === 106 && fb.args.p_reason === 'not_recorded' && fb.args.p_take_off === false, fb);
+        await page.evaluate(() => { document.querySelector('details[data-g="off"]').open = true; });
+        await page.evaluate(() => window.app.nlpDecide(104, 'selected'));
+        await sleep(400);
+        check('an open section stays open after a row action', await page.evaluate(() => document.querySelector('details[data-g="off"]')?.open === true
+            && document.querySelector('details[data-g="more"]')?.open === false));
         await shot('3-list');
 
         console.log('\nRow actions');

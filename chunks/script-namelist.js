@@ -510,7 +510,7 @@
             return keys.map(k => {
                 const rs = by.get(k);
                 const cont = rs.filter(r => r.contact_at).length;
-                return `<details class="inv-agent"${keys.length === 1 || k === meId ? ' open' : ''}>
+                return `<details class="inv-agent" data-g="a${Number(k)}"${_open('a' + Number(k), keys.length === 1 || k === meId)}>
                     <summary><span class="inv-agent-n">${esc(rs[0].agent_name || 'No agent')}</span><span class="inv-agent-s">${rs.length} · ${cont} contacted</span></summary>
                     ${rs.map(r => _rowHtml(r, d, work)).join('')}
                 </details>`;
@@ -544,10 +544,10 @@
                 ${work ? _addBoxHtml() : ''}
                 <div class="inv-group-h">On the list (${sel.length})</div>
                 ${sel.length ? groupRows(sel) : '<div class="inv-why-none">Nobody ticked yet.</div>'}
-                ${pend.length ? `<details class="inv-agent nlp-more"${sel.length ? '' : ' open'}>
+                ${pend.length ? `<details class="inv-agent nlp-more" data-g="more"${_open('more', !sel.length)}>
                     <summary><span class="inv-agent-n">More suggestions (${pend.length})</span><span class="inv-agent-s">tick to add</span></summary>
                     ${pend.map(r => _rowHtml(r, d, work)).join('')}</details>` : ''}
-                ${rem.length ? `<details class="inv-agent nlp-more">
+                ${rem.length ? `<details class="inv-agent nlp-more" data-g="off"${_open('off', false)}>
                     <summary><span class="inv-agent-n">Taken off (${rem.length})</span><span class="inv-agent-s">with the reason</span></summary>
                     ${rem.map(r => _rowHtml(r, d, work)).join('')}</details>` : ''}
                 ${!rows.length ? `<div class="nlp-empty">Nobody matches this ${_whoText(l) ? 'rule' : 'line and goal'} yet${l.scope === 'team' ? ' in your team' : ''}. Try another ${_whoText(l) ? 'rule' : 'goal'}, or add people yourself.</div>` : ''}
@@ -656,9 +656,12 @@
     };
 
     const _row = (id) => (_nlp.detail?.rows || []).find(r => Number(r.id) === Number(id));
+    // After a row action the list redraws; agent groups / sections that were open stay open.
+    const _open = (g, dflt) => ((_nlp.openGroups ? _nlp.openGroups.includes(g) : dflt) ? ' open' : '');
     const _refresh = async () => {
         const y = window.scrollY;
-        await _renderDetail();
+        _nlp.openGroups = [...document.querySelectorAll('.nlp-detail details[data-g][open]')].map(e => e.dataset.g);
+        try { await _renderDetail(); } finally { _nlp.openGroups = null; }
         try { window.scrollTo(0, y); } catch (_) { /* jsdom */ }
     };
 
