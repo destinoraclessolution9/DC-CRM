@@ -89,11 +89,14 @@
         }
         return s.slice(0, 10);
     };
-    const _d = (v) => {
+    // "29 Oct" this year, "1 Jan 2025" for an earlier (or later) year.
+    const _d = (v, withYear) => {
         if (!v) return '';
         const s = _ymd(v);
         const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-        return m ? `${Number(m[3])} ${_MON[Number(m[2]) - 1]}` : s;
+        if (!m) return s;
+        const y = withYear || Number(m[1]) !== new Date().getFullYear() ? ` ${m[1]}` : '';
+        return `${Number(m[3])} ${_MON[Number(m[2]) - 1]}${y}`;
     };
     const _rm = (n) => 'RM ' + Number(n || 0).toLocaleString('en-MY', { maximumFractionDigits: 0 });
     const _waPhone = (raw) => {
@@ -166,7 +169,7 @@
             ${c.revenue ? `<span><b>${_rm(c.revenue)}</b></span>` : ''}
         </div>`;
     };
-    const _dy = (v) => v ? `${_d(v)} ${String(v).slice(0, 4)}` : '';
+    const _dy = (v) => _d(v, true);
     const _whoText = (l) => {
         if (!l.who || l.who === 'best') return '';
         const t = (NLP_WHO.find(w => w[0] === l.who) || [null, l.who])[1];
@@ -582,7 +585,10 @@
         if (r.reply === 'interested') return { step: `Book a meeting${about}`, why: 'Said interested' };
         if (r.reply === 'no_reply') return { step: 'Try once more — a call this time', why: 'No reply yet' };
         if (r.contact_at) return { step: 'Get their answer', why: 'then press Reply…' };
-        if (l.offer && (!r.next_step_rule || r.next_step_rule === 'default')) return { step: `Offer: ${l.offer}`, why: r.next_step_why || '' };
+        // The offer leads a promotion list; only a follow-up task that is due comes first.
+        if (l.offer && r.next_step_rule !== 'task_due') {
+            return { step: `Offer: ${l.offer}`, why: !r.next_step_rule || r.next_step_rule === 'default' ? r.next_step_why || '' : r.next_step || '' };
+        }
         return r.next_step ? { step: r.next_step, why: r.next_step_why || '' } : null;
     };
     const _rowHtml = (r, d, work) => {

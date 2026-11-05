@@ -56,9 +56,11 @@ const installFakes = () => {
         freq_limit: 2, freq_days: 30,
         rows: [
             row({ id: 101, name: 'Alice Lee', grp: 'strong', fit: 85, contact_at: '2026-11-02T17:10:00Z', contact_via: 'whatsapp', reply: 'interested', reply_note: 'wants a visit', sale_amount: 3800, sale_date: '2026-11-03', sale_item: 'Power Ring' }),
-            row({ id: 102, name: 'Ben Tan', freq: 2, rank: 2, contact_at: '2026-11-03T02:00:00Z', contact_via: 'called' }),
+            row({ id: 102, name: 'Ben Tan', freq: 2, rank: 2, contact_at: '2026-11-03T02:00:00Z', contact_via: 'called',
+                  reasons: [{ t: 'Bought Power Ring PR6', d: '2024-01-01', p: 50, ref: 'person' }] }),
             row({ id: 103, name: 'Cara Dnf', dni: true, rank: 3 }),
-            row({ id: 104, name: 'Dan Extra', decision: 'pending', engine_picked: false, rank: 4 }),
+            row({ id: 104, name: 'Dan Extra', decision: 'pending', engine_picked: false, rank: 4,
+                  ...(window.__nlRule ? { next_step_rule: window.__nlRule, next_step: window.__nlRule === 'task_due' ? 'Follow up: Step 1 order WA' : 'Arrange a follow-up talk about 汇集' } : {}) }),
             row({ id: 105, name: 'Eve Gone', decision: 'removed', decision_reason: 'not_fit', decision_note: 'moved overseas', decided_by_name: 'System Admin', rank: 5 }),
             row({ id: 106, name: 'Fay Added', customer_id: 77, prospect_id: null, person_key: 'c:77', source: 'manual', added_by_name: 'System Admin', add_note: 'met at dinner', reasons: [], fit: null, reply: 'interested', reply_at: '2026-11-03T03:00:00Z' }),
         ],
@@ -327,6 +329,14 @@ async function main() {
         check('header: rule + window + offer', hd.includes('Bought exactly 1 · bought 1 Jan 2026 – 30 Jun 2026') && hd.includes('🏷 2nd ring RM1,000 off'), hd.slice(0, 400));
         check('next step: untouched row → the offer', (await nextOf(104)).includes('Offer: 2nd ring RM1,000 off'), await nextOf(104));
         check('next step: progress still wins over the offer', (await nextOf(102)).includes('Get their answer'), await nextOf(102));
+        check('reason dates: an earlier year shows the year', (await page.evaluate(() => document.getElementById('nl-row-102')?.textContent || '')).includes('1 Jan 2024'));
+        await page.evaluate(() => { window.__nlRule = 'came_no_buy'; return window.app.nlpOpen(11); });
+        await page.waitForFunction(() => (document.querySelector('#nl-row-104 .nlp-next')?.textContent || '').includes('汇集'), { timeout: 10000 });
+        check('next step: the offer beats a general suggestion (kept as the why)', (await nextOf(104)).includes('Offer: 2nd ring RM1,000 off') && (await nextOf(104)).includes('Arrange a follow-up talk about 汇集'), await nextOf(104));
+        await page.evaluate(() => { window.__nlRule = 'task_due'; return window.app.nlpOpen(11); });
+        await page.waitForFunction(() => (document.querySelector('#nl-row-104 .nlp-next')?.textContent || '').includes('Step 1'), { timeout: 10000 });
+        check('next step: a due follow-up task still comes first', (await nextOf(104)).includes('Follow up: Step 1 order WA') && !(await nextOf(104)).includes('Offer:'), await nextOf(104));
+        await page.evaluate(() => { window.__nlRule = null; });
         await page.evaluate(() => { window.__opened = []; window.app.nlpWhatsApp(102); });
         check('WhatsApp opener carries the offer', await page.evaluate(() => decodeURIComponent(window.__opened[0] || '').includes('2nd ring RM1,000 off')));
         await page.evaluate(() => window.app.nlpEdit());
