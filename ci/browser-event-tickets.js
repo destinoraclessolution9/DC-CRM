@@ -238,6 +238,28 @@ async function main() {
         check('duplicate category names are refused', (await page.evaluate(() => window.__toasts)).some(t => /both called/.test(t)));
         await page.evaluate(() => window.UI.hideModal());
 
+        console.log('\nCalendar quick Create New — same Big event tick');
+        await page.evaluate(() => window.app.openCpsCreateEventModal());
+        await page.waitForFunction(() => document.getElementById('tt-editor')?.dataset.ttReady === '1', { timeout: 8000 });
+        check('quick form has the tick, single price showing', await page.evaluate(() => !!document.getElementById('mkt-big-event') && getComputedStyle(document.getElementById('mkt-normal-prices')).display !== 'none'));
+        await page.evaluate(() => {
+            const cb = document.getElementById('mkt-big-event'); cb.scrollIntoView({ block: 'center' }); cb.click();
+            window.app.ttEdAdd(1); window.app.ttEdAdd(3);
+            document.getElementById('mkt-title').value = 'TEST Quick Gala (Claude)';
+            const c = [...document.querySelectorAll('#mkt-event-categories .mkt-event-category-cb')].find(x => !/汇集|汇聚/.test(x.value));
+            c.checked = true;
+            document.getElementById('tt-p-0').value = '1888';
+            document.getElementById('tt-p-1').value = '288';
+        });
+        check('ticked → categories replace the single price', await page.evaluate(() => getComputedStyle(document.getElementById('mkt-normal-prices')).display === 'none' && document.querySelectorAll('.tt-card').length === 2));
+        await page.evaluate(() => document.getElementById('tt-editor').scrollIntoView());
+        await h.shot('1b-quick-create-form');
+        await page.evaluate(async () => { await window.app.saveCpsNewEvent(); });
+        await sleep(500);
+        const quick = await page.evaluate(() => window.__db.events.find(e => e.title === 'TEST Quick Gala (Claude)') || null);
+        check('quick form saves a big event', quick && quick.is_big_event === true && quick.ticket_tiers.map(t => t.name).join() === 'VVIP,Normal' && quick.ticket_price === 288, quick);
+        await page.evaluate(() => window.UI.hideModal());
+
         console.log('\nAdd Attendee — Amy (Team A)');
         await login(page, USERS.amy);
         await page.evaluate((eid, s, d) => window.app.showAddAttendeeSearch(eid, s, d), EID, SESSION, DATE);

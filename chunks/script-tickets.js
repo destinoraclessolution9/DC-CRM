@@ -13,7 +13,8 @@
  * Migration: migrations/event_ticket_tiers_2026-11-03.sql.
  *
  * Surfaces:
- *   Marketing → Events add / edit   Big event tick + category editor (ttInitEditor / ttReadEditor)
+ *   Marketing → Events add / edit   Big event tick + category editor (ttInitEditor / ttApplyEditor);
+ *   + calendar quick Create New     the same tick + editor in the activity form's event box
  *   Add Attendee / Add Agent        category picker + "run out" pop-up (ttMountPicker / ttResolvePick,
  *                                   called through _ttMount / _ttResolve in the activities chunk)
  *   Calendar Activity Details       ticket chip per attendee + seat summary (ttAttendeeChip /
@@ -243,6 +244,19 @@
         const pub = tiers.filter(t => !t.agent_only);
         const paid = (pub.length ? pub : tiers).map(t => Number(t.price) || 0).filter(p => p > 0);
         return { is_big_event: !!cb.checked, ticket_tiers: tiers, from_price: paid.length ? Math.min(...paid) : 0 };
+    };
+
+    // Save step shared by both event forms (Marketing → Events and the calendar's
+    // quick Create New): copies the editor onto the row being saved. Returns an
+    // error to show, or '' (also when the form has no editor — columns untouched).
+    const ttApplyEditor = (data) => {
+        const r = ttReadEditor();
+        if (!r) return '';
+        if (r.error) return r.error;
+        data.is_big_event = r.is_big_event;
+        data.ticket_tiers = r.ticket_tiers;
+        if (r.is_big_event) data.ticket_price = r.from_price;
+        return '';
     };
 
     // ── Ticket picker (Add Attendee / Add Agent / change an attendee's ticket) ──
@@ -490,6 +504,7 @@
         ttEdRemove,
         ttEdFillSeats,
         ttReadEditor,
+        ttApplyEditor,
         ttMountPicker: _ttMountPicker,
         ttResolvePick: _ttResolvePick,
         ttPickTier,

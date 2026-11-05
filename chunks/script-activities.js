@@ -5038,9 +5038,13 @@ My raw notes:
             <div id="mkt-dup-warn" style="display:none;margin:-4px 0 12px;padding:10px 12px;border:1px solid #fcd34d;border-radius:8px;background:#fffbeb;font-size:13px;"></div>
             <small style="display:block;margin:-4px 0 12px;color:#6b7280;">This saves the topic only — the date, time, venue and speaker are set on each calendar session.</small>
             <div class="form-group"><label>Market / Country</label><select id="mkt-event-country" class="form-control">${(window.UI.countries || []).map(c => `<option value="${c.code}" ${c.code === window._crmUtils.cuHomeCountry() ? 'selected' : ''}>${window._crmUtils.escapeHtml(c.name)} (${window._crmUtils.escapeHtml(c.symbol)})</option>`).join('')}</select></div>
-            <div class="form-group"><label>Ticket Price</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
-            <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" placeholder="e.g. 199"></div>
-            <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" placeholder="e.g. 299 (min 5 pax)"></div>
+            <div class="form-group"><label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="mkt-big-event" onchange="app.ttToggleBig(this.checked)"> Big event — several ticket categories (VVIP, VIP, Normal…)</label></div>
+            <div id="mkt-normal-prices">
+                <div class="form-group"><label>Ticket Price</label><input type="number" id="mkt-price" class="form-control" value="0"></div>
+                <div class="form-group"><label>Early Bird Price (RM)</label><input type="text" id="mkt-early-bird-price" class="form-control" placeholder="e.g. 199"></div>
+                <div class="form-group"><label>Group Purchase Price (RM)</label><input type="text" id="mkt-group-price" class="form-control" placeholder="e.g. 299 (min 5 pax)"></div>
+            </div>
+            <div id="tt-editor" style="display:none;"><div style="color:var(--gray-400);font-size:13px;">Loading ticket categories…</div></div>
             <div class="form-group"><label>Duration (text fallback)</label><input type="text" id="mkt-duration" class="form-control" placeholder="e.g. 2 hours"></div>
             <div class="form-group"><label>Target Group</label><input type="text" id="mkt-target" class="form-control"></div>
             <div class="form-group"><label>Description</label><textarea id="mkt-desc" class="form-control"></textarea></div>
@@ -5063,6 +5067,8 @@ My raw notes:
             { label: 'Save', type: 'primary', action: '(async () => { await app.saveCpsNewEvent(); })()' }
         ]);
         huijiInitSection({ eventId: null });
+        // Big event tick + ticket categories — same editor as Marketing → Events.
+        window._loadChunk('chunks/script-tickets.min.js').then(() => window.app.ttInitEditor && window.app.ttInitEditor(null)).catch(() => {});
     };
 
     // Create New on a title that already exists: show a warning with "Use
@@ -5152,6 +5158,8 @@ My raw notes:
             created_by: _state.cu ? _state.cu.id : null,
             updated_at: new Date().toISOString()
         };
+        const _ttErr = window.app.ttApplyEditor ? window.app.ttApplyEditor(data) : '';
+        if (_ttErr) return UI.toast.error(_ttErr);
 
         const _posterFile = document.getElementById('mkt-poster-file')?.files?.[0];
         if (_posterTooLarge(_posterFile)) return;

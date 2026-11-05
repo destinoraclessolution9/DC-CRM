@@ -1485,16 +1485,10 @@
             const _hv = window.app.huijiValidateBeforeSave ? window.app.huijiValidateBeforeSave() : { ok: true };
             if (!_hv.ok) return UI.toast.error(_hv.msg);
 
-            // Big event ticket categories (null = editor not loaded → leave the
-            // columns as they are). A big event's Ticket Price = its lowest paid
-            // category, so the list / invites / noticeboard still show a price.
-            const _tt = window.app.ttReadEditor ? window.app.ttReadEditor() : null;
-            if (_tt && _tt.error) return UI.toast.error(_tt.error);
-            if (_tt) {
-                data.is_big_event = _tt.is_big_event;
-                data.ticket_tiers = _tt.ticket_tiers;
-                if (_tt.is_big_event) data.ticket_price = _tt.from_price;
-            }
+            // Big event ticket categories (tickets chunk; editor not loaded →
+            // columns left as they are).
+            const _ttErr = window.app.ttApplyEditor ? window.app.ttApplyEditor(data) : '';
+            if (_ttErr) return UI.toast.error(_ttErr);
 
             const _posterFile = document.getElementById('mkt-poster')?.files[0];
             try {
