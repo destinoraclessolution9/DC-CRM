@@ -1,6 +1,6 @@
 // ci/test-attendee-popup-sim.js — the event attendee pop-up (2026-10-26):
-// a copy icon per value, "Copy all for Google Sheet" (tab-separated, IC kept
-// as text), and Close / × / Escape / phone Back returning to the event it was
+// a copy icon per value (incl. Contact Number), "Copy all for Google Sheet"
+// (tab-separated, contact + IC kept as text), and Close / × / Escape / phone Back returning to the event it was
 // opened from. Loads the REAL ui.js (showModal / hideModal / closeModal) and
 // the REAL activities chunk in one vm sandbox with a small DOM stub.
 // Run: node ci/test-attendee-popup-sim.js
@@ -79,7 +79,7 @@ const UI = windowStub.UI || sandbox.UI;
 UI.toast = { success: (m) => toasts.push(['ok', m]), error: (m) => toasts.push(['err', m]), info() {} };
 sandbox.UI = UI;
 const PEOPLE = {
-  'prospects:77': { id: 77, full_name: 'Alan <b>Woon</b>', ic_number: '030519105747', email: 'a@x.com', date_of_birth: '1970-05-19', lunar_birth: '1970-04-15 (Lunar)', occupation: '', responsible_agent_id: 5 },
+  'prospects:77': { id: 77, full_name: 'Alan <b>Woon</b>', phone: '0123456789', ic_number: '030519105747', email: 'a@x.com', date_of_birth: '1970-05-19', lunar_birth: '1970-04-15 (Lunar)', occupation: '', responsible_agent_id: 5 },
   'users:5': { id: 5, full_name: 'Oo Kean Cherng' },
 };
 sandbox.AppDataStore = { getById: async (t, id) => PEOPLE[`${t}:${id}`] || null };
@@ -111,18 +111,22 @@ const run = (js) => vm.runInContext(js, sandbox);
   const html = overlay().innerHTML;
   check('pop-up open', isOpen());
   check('name escaped', html.includes('Alan &lt;b&gt;Woon&lt;/b&gt;') && !html.includes('<b>Woon'));
-  check('copy icon per filled value (6 of 7)', (html.match(/app\.attCopy\(\d, this\)/g) || []).length, 6);
-  check('empty value: dash, no icon', html.includes('>—<') && !html.includes('app.attCopy(5, this)'));
+  check('copy icon per filled value (7 of 8)', (html.match(/app\.attCopy\(\d, this\)/g) || []).length, 7);
+  check('Contact Number row right after Name', /Name<\/span>[\s\S]*?Contact Number<\/span>[\s\S]*?0123456789[\s\S]*?IC Number/.test(html));
+  check('empty value: dash, no icon', html.includes('>—<') && !html.includes('app.attCopy(6, this)'));
   check('Copy all button', html.includes('Copy all for Google Sheet'));
   check('× goes through closeModal', html.includes('class="modal-close" onclick="UI.closeModal()"'));
   check('Close button goes through closeModal', footerAction('Close'), 'UI.closeModal()');
   check('history entry pushed for phone Back', hist.stack.length, 2);
 
   await app.attCopy(1, null);
+  check('copy one value (contact as shown)', clip.pop(), '0123456789');
+  toasts.pop();
+  await app.attCopy(2, null);
   check('copy one value (IC as shown)', clip.pop(), '030519105747');
   check('copied toast', toasts.pop()[1], 'Copied');
   await app.attCopyAll(null);
-  check('copy all: one tab-separated row, IC kept as text', clip.pop(), "Alan <b>Woon</b>\t'030519105747\ta@x.com\t1970-05-19\t1970-04-15 (Lunar)\t\tOo Kean Cherng");
+  check('copy all: one tab-separated row, contact + IC kept as text', clip.pop(), "Alan <b>Woon</b>\t'0123456789\t'030519105747\ta@x.com\t1970-05-19\t1970-04-15 (Lunar)\t\tOo Kean Cherng");
   clipFail = true;
   await app.attCopy(0, null);
   check('clipboard denied → execCommand fallback still copies', toasts.pop()[0], 'ok');
@@ -164,6 +168,19 @@ const run = (js) => vm.runInContext(js, sandbox);
   run(footerAction('Close'));
   await flush(); await runTimers();
   check('no event: closed, nothing reopened', !isOpen() && appCalls.length === 0);
+
+  // ── contact formats: +60 / dashes kept as text, missing contact = dash ───
+  PEOPLE['customers:88'] = { id: 88, full_name: 'Bee', phone: '+60 12-345 6789', ic_number: '', email: '123', responsible_agent_id: null };
+  PEOPLE['prospects:89'] = { id: 89, full_name: 'Cee', phone: null, ic_number: '980425-06-xxxx' };
+  await app.showAttendeeDetails(88, 'customer');
+  await app.attCopyAll(null);
+  check('copy all: +60 contact kept as text, other fields untouched', clip.pop(), "Bee\t'+60 12-345 6789\t\t123\t\t\t\t");
+  UI.hideModal();
+  await app.showAttendeeDetails(89, 'prospect');
+  check('no contact: no copy icon on that row', !overlay().innerHTML.includes('app.attCopy(1, this)'));
+  await app.attCopyAll(null);
+  check('copy all: empty contact cell, masked IC left as is', clip.pop(), 'Cee\t\t980425-06-xxxx\t\t\t\t\t');
+  UI.hideModal();
 
   // ── other modals: a plain hideModal never runs a stale onClose ───────────
   let ran = 0;

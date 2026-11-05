@@ -5564,10 +5564,12 @@ My raw notes:
         if (await _copyText(v)) { _attFlash(btn); UI.toast.success('Copied'); } else UI.toast.error('Could not copy — press and hold the text instead');
     };
     // One row, tab-separated, so a paste into one Google Sheets cell fills the
-    // next cells. An all-digit IC gets a leading ' so Sheets keeps it as text
-    // (leading zeros of 2000s ICs survive); the ' is hidden in the sheet.
+    // next cells. A number-looking IC or contact number gets a leading ' so
+    // Sheets keeps it as text (the 0 of 012… / 2000s ICs survives, +60… isn't
+    // turned into a number); the ' is hidden in the sheet.
+    let _attAsText = [];
     const attCopyAll = async (btn) => {
-        const cells = _attVals.map((v, i) => (i === 1 && /^\d+$/.test(v) ? `'${v}` : v).replace(/[\t\r\n]+/g, ' '));
+        const cells = _attVals.map((v, i) => (_attAsText[i] && /^\+?\d[\d\s-]*$/.test(v) ? `'${v}` : v).replace(/[\t\r\n]+/g, ' '));
         if (await _copyText(cells.join('\t'))) { _attFlash(btn); UI.toast.success('Copied — paste into one cell in Google Sheets'); }
         else UI.toast.error('Could not copy');
     };
@@ -5594,12 +5596,14 @@ My raw notes:
         const person = await AppDataStore.getById(table, entityId);
         if (!person) { UI.toast.error('Profile not found'); return; }
         const agent = person.responsible_agent_id ? await AppDataStore.getById('users', person.responsible_agent_id) : null;
+        // [label, value, keep as text in Google Sheets]
         const fields = [
-            ['Name', person.full_name], ['IC Number', person.ic_number], ['Email', person.email],
-            ['Date of Birth', person.date_of_birth], ['Lunar Date of Birth', person.lunar_birth],
+            ['Name', person.full_name], ['Contact Number', person.phone, true], ['IC Number', person.ic_number, true],
+            ['Email', person.email], ['Date of Birth', person.date_of_birth], ['Lunar Date of Birth', person.lunar_birth],
             ['Occupation', person.occupation], ['Agent', agent?.full_name],
         ];
         _attVals = fields.map(f => String(f[1] == null ? '' : f[1]).trim());
+        _attAsText = fields.map(f => !!f[2]);
         const row = ([label], i) => `
             <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border,#e5e0d8);min-height:36px;">
                 <span style="width:120px;font-size:12px;color:var(--gray-400);flex-shrink:0;">${escapeHtml(label)}</span>
