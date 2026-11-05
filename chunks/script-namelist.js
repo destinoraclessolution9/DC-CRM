@@ -40,6 +40,13 @@
     };
     // Who to include: the engine's best fits, or everyone by what they bought from the line.
     const NLP_WHO = [['best', 'Best fit (CRM picks)'], ['owns_1', 'Bought exactly 1'], ['owns_any', 'Bought 1 or more'], ['owns_none', 'Never bought']];
+    // "Not right?" notes — kept to study the suggestions (engine rows: what is wrong; added by hand: why missed).
+    const NLP_FB_WRONG = [['owns_more', 'Already owns more than shown'], ['not_interested', 'Not interested / not suitable'],
+        ['not_mine', 'Not my customer / wrong agent'], ['bad_record', 'Record is wrong (duplicate, bought for someone else)'],
+        ['bad_timing', 'Bad timing (just bought, just contacted)'], ['wrong_reason', 'The reason shown is wrong'], ['other', 'Other (write why)']];
+    const NLP_FB_MISSED = [['should_match', 'Should have matched'], ['not_recorded', 'Interested, but not recorded in the CRM'],
+        ['referred', 'Referred / new contact'], ['other', 'Other (write why)']];
+    const _fbLabel = (k) => ([...NLP_FB_WRONG, ...NLP_FB_MISSED].find(x => x[0] === k) || [null, k])[1].replace(' (write why)', '');
     const NLP_REMOVE = [['not_fit', 'Not suitable now'], ['handled', 'Already being handled'], ['wrong_person', 'Wrong person / duplicate'], ['no_contact', 'Cannot reach'], ['other', 'Other (write why)']];
     const NLP_REPLY = [['interested', '👍 Interested'], ['not_now', '⏳ Not now'], ['not_interested', '🙅 Not interested'], ['no_reply', '… No reply']];
     const NLP_STEP_LABEL = {
@@ -554,6 +561,10 @@
         </div>
         <div class="inv-addbox" id="nlp-addbox" hidden>
             <input type="search" class="form-control" id="nlp-add-q" placeholder="Type a name to find the person" oninput="app.nlpAddSearch(this.value)">
+            <select class="form-control" id="nlp-add-why">
+                <option value="">Why did the CRM miss them? (optional)</option>
+                ${NLP_FB_MISSED.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}
+            </select>
             <input type="text" class="form-control" id="nlp-add-note" placeholder="Why this person? (optional)" maxlength="200">
             <div id="nlp-add-warn"></div>
             <div class="inv-add-res" id="nlp-add-res"></div>
@@ -622,6 +633,9 @@
         }
         const removed = r.decision === 'removed'
             ? `<div class="inv-warn">Taken off: ${esc((NLP_REMOVE.find(x => x[0] === r.decision_reason) || [null, r.decision_reason || ''])[1])}${r.decision_note ? ' — ' + esc(r.decision_note) : ''}${r.decided_by_name ? ` <span class="inv-when">${esc(r.decided_by_name)}</span>` : ''}</div>` : '';
+        const notes = (r.feedback || []).slice(0, 2).map(f => `<div class="nlp-fb">${f.kind === 'missed' ? '💬 Missed' : '👎 Not right'}: ${esc(_fbLabel(f.reason))}${f.note ? ` — “${esc(f.note)}”` : ''} <span class="inv-when">${esc(f.by || '')} · ${esc(_d(f.at))}</span></div>`).join('')
+            + ((r.feedback || []).length > 2 ? `<div class="inv-when">+${r.feedback.length - 2} more note${r.feedback.length - 2 === 1 ? '' : 's'}</div>` : '');
+        const flag = work ? `<button type="button" class="nlp-flag" onclick="event.stopPropagation();app.nlpForm(${id}, 'flag')">${r.source === 'manual' ? '💬 Why missed?' : '👎 Not right?'}</button>` : '';
         return `
             <div class="inv-row nl-row${r.decision === 'removed' ? ' is-closed' : ''}" id="nl-row-${id}">
                 <div class="inv-main">
@@ -632,7 +646,9 @@
                     ${warns.length ? `<div class="inv-warn">⚠ ${esc(warns.join(' · '))}</div>` : ''}
                     ${removed}
                     ${_progressHtml(r)}
+                    ${notes}
                     ${r.fit != null ? `<span class="inv-score">Fit ${Number(r.fit)} · Engaged ${Number(r.engagement || 0)} · Ready ${Number(r.readiness || 0)}${r.last_touch ? ` · last met ${esc(_d(r.last_touch))}` : ''}</span>` : ''}
+                    ${flag}
                 </div>
                 <div class="inv-acts">${acts}</div>
                 <div class="inv-form" id="nl-form-${id}"></div>
@@ -681,7 +697,36 @@
                     <button type="button" class="btn btn-sm primary" onclick="event.stopPropagation();app.nlpRemove(${n})">Take off</button>
                     <button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.nlpForm(${n}, 'remove')">Cancel</button>
                 </div></div>`;
+        } else if (kind === 'flag') {
+            const r = _row(id) || {};
+            const missed = r.source === 'manual';
+            box.innerHTML = `<div class="inv-form-in">
+                <label class="inv-sub" for="nl-f-${n}">${missed ? 'Why did the CRM miss this person?' : 'What is not right about this suggestion?'}</label>
+                <select class="form-control" id="nl-f-${n}">
+                    <option value="">— pick one —</option>
+                    ${(missed ? NLP_FB_MISSED : NLP_FB_WRONG).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}
+                </select>
+                <input type="text" class="form-control" id="nl-fn-${n}" placeholder="Comment — what you know that the CRM doesn't" maxlength="500">
+                ${!missed && r.decision !== 'removed' ? `<label class="nlp-radio"><input type="checkbox" id="nl-fo-${n}" checked> Also take them off this list</label>` : ''}
+                <div class="inv-sub">Saved with what the CRM saw, so the suggestions can be improved later.</div>
+                <div class="inv-form-btns">
+                    <button type="button" class="btn btn-sm primary" onclick="event.stopPropagation();app.nlpFlag(${n})">Save note</button>
+                    <button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.nlpForm(${n}, 'flag')">Cancel</button>
+                </div></div>`;
         }
+    };
+    const nlpFlag = async (id) => {
+        const n = Number(id);
+        const reason = document.getElementById(`nl-f-${n}`)?.value || '';
+        const note = (document.getElementById(`nl-fn-${n}`)?.value || '').trim();
+        const off = !!document.getElementById(`nl-fo-${n}`)?.checked;
+        if (!reason) { UI.toast.error('Pick one'); return; }
+        if (reason === 'other' && !note) { UI.toast.error('Write a short comment'); return; }
+        try {
+            const r = await _rpc('name_list_feedback', { p_row: n, p_reason: reason, p_note: note || null, p_take_off: off });
+            UI.toast.success(r && r.took_off ? 'Noted and taken off the list' : 'Noted — thank you');
+            await _refresh();
+        } catch (e) { UI.toast.error(_err(e)); }
     };
     const nlpDecide = async (id, decision, reason = null, note = null) => {
         try {
@@ -778,6 +823,12 @@
                 return;
             }
             if (r && r.ok === false) { UI.toast.info(r.msg || 'Already on this list'); return; }
+            // a new row added by hand = the CRM missed them; keep why, for study
+            const why = document.getElementById('nlp-add-why')?.value || '';
+            if (why && r && r.id && !r.existing && (why !== 'other' || note)) {
+                try { await _rpc('name_list_feedback', { p_row: Number(r.id), p_reason: why, p_note: note || null, p_take_off: false }); }
+                catch (e) { console.warn('[namelist] why-missed note not saved:', e); }
+            }
             UI.toast.success('Added to the list');
             await _refresh();
         } catch (e) { UI.toast.error(_err(e)); }
@@ -905,10 +956,12 @@
                     <thead><tr><th>List</th><th>Picked</th><th>Contacted</th><th>Replied</th><th>Interested</th><th>Met</th><th>Closed</th><th>Sales</th><th>Reach</th><th>Close</th></tr></thead>
                     <tbody>${rows}</tbody></table></div>` : '<div class="nlp-empty">No started lists yet.</div>'}
             </div>
+            <div class="inv-sec" id="nlp-acc" style="margin-top:14px;" hidden></div>
             <div class="inv-sec" style="margin-top:14px;">
                 <h4>🎯 Event invitations</h4>
                 <div id="nlp-ev-results">${_spin('Loading…')}</div>
             </div>`;
+        _renderAccuracy();
         try {
             await window._loadChunk('chunks/script-reporting.min.js');
             const host = document.getElementById('nlp-ev-results');
@@ -919,11 +972,60 @@
         }
     };
 
+    // 🔍 Accuracy — lists I manage: how many suggestions were "not right", added by
+    // hand, and every note with what the CRM saw beside it (agents see nothing here).
+    const _renderAccuracy = async () => {
+        let r;
+        try { r = await _rpc('name_list_feedback_report'); } catch (_) { return; }
+        const host = document.getElementById('nlp-acc');
+        if (!host || _nlp.tab !== 'results') return;
+        _nlp.acc = r;
+        const lists = (r.lists || []).filter(l => Number(l.suggested) || Number(l.added) || Number(l.wrong) || Number(l.missed));
+        if (!lists.length) return;
+        const notes = r.notes || [];
+        const total = (k) => lists.reduce((s, l) => s + (Number(l[k]) || 0), 0);
+        const reasons = {};
+        lists.forEach(l => Object.entries(l.by_reason || {}).forEach(([k, n]) => { reasons[k] = (reasons[k] || 0) + Number(n); }));
+        const top = Object.entries(reasons).sort((a, b) => b[1] - a[1]);
+        host.hidden = false;
+        host.innerHTML = `
+            <div class="nlp-acc-head"><h4>🔍 Accuracy</h4>${notes.length ? '<button type="button" class="btn btn-sm secondary" onclick="app.nlpFbCsv()">CSV</button>' : ''}</div>
+            <div class="inv-sub">“Not right?” notes on suggested names and “why missed” on names added by hand — what the CRM saw beside what the agent knew, to improve the suggestions.</div>
+            <div class="inv-funnel nlp-funnel"><span><b>${total('suggested')}</b> suggested</span><span><b>${total('wrong')}</b> not right</span><span><b>${total('added')}</b> added by hand</span><span><b>${total('missed')}</b> why-missed notes</span></div>
+            ${top.length ? `<div class="inv-objs">${top.map(([k, n]) => `<span class="inv-obj">${esc(_fbLabel(k))} · ${Number(n)}</span>`).join('')}</div>` : ''}
+            <div class="nlp-table-wrap"><table class="nlp-table">
+                <thead><tr><th>List</th><th>Suggested</th><th>Kept</th><th>Not right</th><th>Added by hand</th></tr></thead>
+                <tbody>${lists.map(l => `<tr class="nlp-tr" onclick="app.nlpOpen(${Number(l.id)})">
+                    <td><b>${esc(l.name)}</b><div class="inv-when" style="margin:0;">${esc(l.line_label || l.line)} · ${esc(NLP_GOALS[l.goal] || l.goal)}${_whoText(l) ? ' · ' + esc(_whoText(l)) : ''}</div></td>
+                    <td>${Number(l.suggested) || 0}</td><td>${Number(l.kept) || 0}</td><td>${Number(l.wrong) || 0}</td><td>${Number(l.added) || 0}</td></tr>`).join('')}</tbody>
+            </table></div>
+            ${notes.length ? `<div class="inv-group-h">Notes (${notes.length})</div>${notes.slice(0, 30).map(n => `
+                <div class="nlp-note">
+                    <div><b>${esc(n.name || '—')}</b> <span class="inv-when">${esc(n.list || '')} · V${Number(n.version) || 1}${n.agent ? ' · ' + esc(n.agent) : ''}</span></div>
+                    <div>${n.kind === 'missed' ? '💬 Missed' : '👎 Not right'}: <b>${esc(n.label || _fbLabel(n.reason))}</b>${n.note ? ` — “${esc(n.note)}”` : ''}${n.took_off ? ' <span class="inv-when">· taken off</span>' : ''}</div>
+                    <div class="inv-when" style="margin:0;">CRM said: ${esc((n.crm_said || []).join(' · ') || '—')}${n.fit != null ? ` · Fit ${Number(n.fit)}` : ''}${n.owned != null ? ` · counted ${Number(n.owned)} bought` : ''}</div>
+                    <div class="inv-when" style="margin:0;">${esc(n.by || '')} · ${esc(_d(n.at))}</div>
+                </div>`).join('')}${notes.length > 30 ? `<div class="inv-sub">Showing the newest 30 — the CSV has all ${notes.length}.</div>` : ''}` : ''}`;
+    };
+    const nlpFbCsv = () => {
+        const notes = (_nlp.acc && _nlp.acc.notes) || [];
+        if (!notes.length) return;
+        const q = (s) => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
+        const head = ['Date', 'List', 'Version', 'Person', 'Agent', 'Type', 'What', 'Comment', 'Taken off', 'CRM said', 'Fit', 'Counted bought', 'Next-step rule', 'By'];
+        const rows = notes.map(n => [_ymd(n.at), n.list, n.version, n.name, n.agent, n.kind === 'missed' ? 'Missed' : 'Not right', n.label || _fbLabel(n.reason),
+            n.note, n.took_off ? 'yes' : '', (n.crm_said || []).join('; '), n.fit, n.owned, n.rule, n.by]);
+        const csv = '﻿' + [head, ...rows].map(x => x.map(q).join(',')).join('\r\n');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+        a.download = `name-list-accuracy-${_ymd(new Date().toISOString())}.csv`;
+        document.body.appendChild(a); a.click(); a.remove();
+    };
+
     app.register('namelist', {
         showNameListView,
         nlpTab, nlpFilter, nlpNew, nlpFormSync, nlpCreate, nlpEvents, nlpOpenEvent,
         nlpOpen, nlpBack, nlpVersion, nlpForm, nlpDecide, nlpRemove, nlpStep, nlpStop, nlpWhatsApp, nlpOpenActivity,
-        nlpToggleAdd, nlpAddSearch, nlpAdd, nlpSet, nlpRegenerate, nlpEdit, nlpSaveEdit, nlpCsv,
+        nlpToggleAdd, nlpAddSearch, nlpAdd, nlpSet, nlpRegenerate, nlpEdit, nlpSaveEdit, nlpCsv, nlpFlag, nlpFbCsv,
     });
     console.log('[chunk] script-namelist loaded');
 })();

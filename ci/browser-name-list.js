@@ -55,7 +55,8 @@ const installFakes = () => {
         counts: { picked: 3, contacted: 1, replied: 1, interested: 1, met: 0, closed: 1, revenue: 3800, closed_after_contact: 1 },
         freq_limit: 2, freq_days: 30,
         rows: [
-            row({ id: 101, name: 'Alice Lee', grp: 'strong', fit: 85, contact_at: '2026-11-02T17:10:00Z', contact_via: 'whatsapp', reply: 'interested', reply_note: 'wants a visit', sale_amount: 3800, sale_date: '2026-11-03', sale_item: 'Power Ring' }),
+            row({ id: 101, name: 'Alice Lee', grp: 'strong', fit: 85, contact_at: '2026-11-02T17:10:00Z', contact_via: 'whatsapp', reply: 'interested', reply_note: 'wants a visit', sale_amount: 3800, sale_date: '2026-11-03', sale_item: 'Power Ring',
+                  feedback: [{ kind: 'wrong', reason: 'wrong_reason', note: 'met at a wedding', by: 'System Admin', at: '2026-11-04T03:00:00Z', took_off: false }] }),
             row({ id: 102, name: 'Ben Tan', freq: 2, rank: 2, contact_at: '2026-11-03T02:00:00Z', contact_via: 'called',
                   reasons: [{ t: 'Bought Power Ring PR6', d: '2024-01-01', p: 50, ref: 'person' }] }),
             row({ id: 103, name: 'Cara Dnf', dni: true, rank: 3 }),
@@ -78,6 +79,13 @@ const installFakes = () => {
             case 'name_list_get': return { data: detail(args.p_version), error: null };
             case 'name_list_create': return { data: { ok: true, id: 11, version: 1 }, error: null };
             case 'name_list_preview': return { data: { match: 58, held: 1, agents: 8, per_agent_max: 31 }, error: null };
+            case 'name_list_feedback': return { data: { ok: true, id: 1, took_off: !!args.p_take_off }, error: null };
+            case 'name_list_feedback_report': return { data: {
+                lists: [{ id: 11, name: 'TEST Feng shui Nov', line: 'fengshui', line_label: '风水 Feng Shui', goal: 'decide', who: 'best',
+                          suggested: 6, kept: 3, added: 1, wrong: 2, missed: 1, by_reason: { owns_more: 1, wrong_reason: 1, should_match: 1 } }],
+                notes: [{ list_id: 11, list: 'TEST Feng shui Nov', version: 2, name: 'Ben Tan', agent: 'System Admin', kind: 'wrong', reason: 'owns_more',
+                          label: 'Already owns more than shown', note: 'bought a 2nd in Oct', took_off: true, by: 'System Admin',
+                          at: '2026-11-05T03:00:00Z', fit: 60, owned: null, rule: 'default', crm_said: ['Recent CPS'] }] }, error: null };
             case 'name_list_add': return { data: args.p_force ? { ok: true, id: 107 } : { ok: false, warn: 'Contacted 2× in the last 30 days' }, error: null };
             case 'event_invite_results': return { data: [{ activity_id: 5, date: '2026-10-31', title: 'TEST 天心交喜', objectives: ['fengshui:decide'], reasons: {}, suggested: 33, added: 2, sent: 20, coming: 8, came: 6, closed: 1 }], error: null };
             case 'new_friend_list': case 'invite_smart_list': return { data: [], error: null };
@@ -227,6 +235,32 @@ async function main() {
         const fay = await page.evaluate(() => document.getElementById('nl-row-106')?.innerText || '');
         check('added person: chip + note, customer link', fay.includes('Added by System Admin') && fay.includes('met at dinner') && fay.includes('Customer'), fay);
         check('taken-off reason shown', (await page.evaluate(() => document.getElementById('nl-row-105')?.textContent || '')).includes('Not suitable now — moved overseas'));
+
+        console.log('\nNot right? notes');
+        check('a row shows its note', alice.includes('👎 Not right: The reason shown is wrong') && alice.includes('met at a wedding'), alice);
+        check('engine rows: "Not right?"; added by hand: "Why missed?"', await page.evaluate(() =>
+            document.querySelector('#nl-row-102 .nlp-flag')?.textContent.includes('Not right?') && document.querySelector('#nl-row-106 .nlp-flag')?.textContent.includes('Why missed?')));
+        await click('#nl-row-102 .nlp-flag');
+        check('form: 7 "what is wrong" choices + take off ticked', await page.evaluate(() =>
+            document.querySelectorAll('#nl-f-102 option').length === 8 && document.getElementById('nl-fo-102')?.checked === true));
+        await page.evaluate(() => { document.getElementById('nl-f-102').value = 'other'; });
+        await clickText('#nl-form-102 button', 'Save note');
+        await sleep(300);
+        check('"Other" needs a comment', (await calls('name_list_feedback')).length === 0 && (await page.evaluate(() => window.__toasts.slice(-1)[0] || '')).includes('comment'));
+        await page.evaluate(() => { document.getElementById('nl-f-102').value = 'owns_more'; document.getElementById('nl-fn-102').value = 'bought a 2nd in Oct'; });
+        await clickText('#nl-form-102 button', 'Save note');
+        await sleep(400);
+        let fb = await last('name_list_feedback');
+        check('Save note → name_list_feedback(row, reason, comment, take off)', fb && fb.args.p_row === 102 && fb.args.p_reason === 'owns_more'
+            && fb.args.p_note === 'bought a 2nd in Oct' && fb.args.p_take_off === true, fb);
+        await click('#nl-row-106 .nlp-flag');
+        check('added by hand: "why missed" choices, no take off', await page.evaluate(() =>
+            document.querySelectorAll('#nl-f-106 option').length === 5 && !document.getElementById('nl-fo-106')));
+        await page.evaluate(() => { document.getElementById('nl-f-106').value = 'not_recorded'; });
+        await clickText('#nl-form-106 button', 'Save note');
+        await sleep(400);
+        fb = await last('name_list_feedback');
+        check('why-missed note saved, never takes off', fb && fb.args.p_row === 106 && fb.args.p_reason === 'not_recorded' && fb.args.p_take_off === false, fb);
         await shot('3-list');
 
         console.log('\nRow actions');
@@ -270,7 +304,7 @@ async function main() {
 
         console.log('\nAdd a person');
         await page.evaluate(() => window.app.nlpToggleAdd());
-        await page.evaluate(() => { document.getElementById('nlp-add-note').value = 'neighbour'; window.app.nlpAddSearch('Gus'); });
+        await page.evaluate(() => { document.getElementById('nlp-add-note').value = 'neighbour'; document.getElementById('nlp-add-why').value = 'referred'; window.app.nlpAddSearch('Gus'); });
         await page.waitForFunction(() => document.getElementById('nlp-add-res')?.innerText.includes('Gus Search'), { timeout: 5000 });
         await click('#nlp-add-res .inv-add-row');
         await page.waitForFunction(() => document.getElementById('nlp-add-warn')?.innerText.includes('add anyway'), { timeout: 5000 });
@@ -280,6 +314,9 @@ async function main() {
         const adds = await calls('name_list_add');
         check('Add anyway → force + note + prospect', adds.length === 2 && adds[0].args.p_force === false && adds[1].args.p_force === true
             && adds[1].args.p_prospect === 300 && adds[1].args.p_note === 'neighbour', adds);
+        const mf = await last('name_list_feedback');
+        check('add a person: "why missed" saved on the new row', mf && mf.args.p_row === 107 && mf.args.p_reason === 'referred'
+            && mf.args.p_note === 'neighbour' && mf.args.p_take_off === false, mf);
 
         console.log('\nList actions + versions');
         await page.evaluate(() => window.app.nlpSet('completed'));
@@ -291,7 +328,8 @@ async function main() {
         check('New version → name_list_regenerate', (await calls('name_list_regenerate')).length === 1);
         await page.evaluate(() => window.app.nlpVersion(1));
         await page.waitForFunction(() => document.querySelector('.nlp-banner')?.innerText.includes('older version'), { timeout: 5000 });
-        check('old version: banner, no row buttons, no add', await page.evaluate(() => document.querySelectorAll('.nl-row .inv-acts button').length === 0 && !document.getElementById('nlp-addbox')));
+        check('old version: banner, no row buttons, no add, no notes link', await page.evaluate(() => document.querySelectorAll('.nl-row .inv-acts button').length === 0
+            && !document.getElementById('nlp-addbox') && !document.querySelector('.nlp-flag')));
         check('version picker asked for V1', (await last('name_list_get')).args.p_version === 1);
         await shot('4-old-version');
         await page.evaluate(() => window.app.nlpBack());
@@ -362,6 +400,11 @@ async function main() {
         const res = await text();
         check('Results: started lists only, funnel + rates', res.includes('TEST Feng shui Nov') && !res.includes('TEST Team ring') && res.includes('100%'), res.slice(0, 400));
         check('Results: event invitations table', res.includes('TEST 天心交喜'), res.slice(0, 800));
+        await page.waitForFunction(() => document.getElementById('nlp-acc') && !document.getElementById('nlp-acc').hidden, { timeout: 10000 });
+        const acc = await page.evaluate(() => document.getElementById('nlp-acc').innerText);
+        check('Accuracy: totals, reasons, list row', acc.includes('2 not right') && acc.includes('1 added by hand') && acc.includes('Already owns more than shown · 1')
+            && acc.includes('TEST Feng shui Nov'), acc.slice(0, 500));
+        check('Accuracy: each note beside what the CRM said', acc.includes('Ben Tan') && acc.includes('bought a 2nd in Oct') && acc.includes('CRM said: Recent CPS · Fit 60'), acc.slice(0, 900));
         await shot('6-results');
 
         console.log('\nReports pointer');
