@@ -12406,6 +12406,8 @@ button.pv-card:focus-visible { outline: 2px solid var(--accent, #E84393); outlin
 .nlp-addhead { padding-bottom: 4px; }
 .nlp-form { display: grid; gap: 8px; }
 .nlp-lbl { font-size: 12.5px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 3px; }
+.nlp-match { font-size: 13px; color: var(--gray-900); min-height: 18px; }
+.nlp-offer { font-weight: 600; }
 .nlp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
 .nlp-purposes { display: flex; gap: 6px 14px; flex-wrap: wrap; }
 .nlp-radio { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; cursor: pointer; }

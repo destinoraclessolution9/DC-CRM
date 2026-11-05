@@ -38,6 +38,8 @@
         follow_up: ['comeback', 'service', 'decide'],
         other: ['decide', 'introduce', 'upgrade', 'service', 'comeback'],
     };
+    // Who to include: the engine's best fits, or everyone by what they bought from the line.
+    const NLP_WHO = [['best', 'Best fit (CRM picks)'], ['owns_1', 'Bought exactly 1'], ['owns_any', 'Bought 1 or more'], ['owns_none', 'Never bought']];
     const NLP_REMOVE = [['not_fit', 'Not suitable now'], ['handled', 'Already being handled'], ['wrong_person', 'Wrong person / duplicate'], ['no_contact', 'Cannot reach'], ['other', 'Other (write why)']];
     const NLP_REPLY = [['interested', '👍 Interested'], ['not_now', '⏳ Not now'], ['not_interested', '🙅 Not interested'], ['no_reply', '… No reply']];
     const NLP_STEP_LABEL = {
@@ -164,8 +166,15 @@
             ${c.revenue ? `<span><b>${_rm(c.revenue)}</b></span>` : ''}
         </div>`;
     };
+    const _dy = (v) => v ? `${_d(v)} ${String(v).slice(0, 4)}` : '';
+    const _whoText = (l) => {
+        if (!l.who || l.who === 'best') return '';
+        const t = (NLP_WHO.find(w => w[0] === l.who) || [null, l.who])[1];
+        return l.bought_from || l.bought_to ? `${t} · bought ${l.bought_from ? _dy(l.bought_from) : '…'} – ${l.bought_to ? _dy(l.bought_to) : 'today'}` : t;
+    };
     const _listMeta = (l) => [
         `${esc(l.line_label || l.line)} · ${esc(NLP_GOALS[l.goal] || l.goal)}`,
+        esc(_whoText(l)),
         l.scope === 'team' ? `team · ${l.target_qty} per agent` : `target ${l.target_qty}`,
         l.target_date ? `by ${_d(l.target_date)}` : '',
         l.mine ? '' : esc(l.owner_name || ''),
@@ -252,16 +261,26 @@
                     <div class="nlp-grid">
                         <div><label class="nlp-lbl" for="nlp-f-line">Product line</label>
                             <select class="form-control" id="nlp-f-line" onchange="app.nlpFormSync()">${lines.map((l, i) => opt(l.key, l.label, i === 0)).join('')}</select></div>
+                        <div><label class="nlp-lbl" for="nlp-f-who">Who to include</label>
+                            <select class="form-control" id="nlp-f-who" onchange="app.nlpFormSync()">${NLP_WHO.map(([k, l], i) => opt(k, l, i === 0)).join('')}</select></div>
                         <div><label class="nlp-lbl" for="nlp-f-goal">Goal</label>
-                            <select class="form-control" id="nlp-f-goal"></select></div>
+                            <select class="form-control" id="nlp-f-goal" onchange="this.dataset.touched='1';app.nlpFormSync()"></select></div>
                         <div><label class="nlp-lbl" for="nlp-f-focus">Focus product (optional)</label>
-                            <select class="form-control" id="nlp-f-focus"></select></div>
+                            <select class="form-control" id="nlp-f-focus" onchange="app.nlpFormSync()"></select></div>
                         <div><label class="nlp-lbl" for="nlp-f-qty" id="nlp-f-qty-l">How many people?</label>
-                            <input type="number" class="form-control" id="nlp-f-qty" min="1" max="200" value="20"></div>
+                            <input type="number" class="form-control" id="nlp-f-qty" min="1" max="200" value="20" oninput="this.dataset.touched='1'"></div>
                         <div><label class="nlp-lbl" for="nlp-f-date">Target date</label>
                             <input type="date" class="form-control" id="nlp-f-date"></div>
                         <div><label class="nlp-lbl" for="nlp-f-name">List name (optional)</label>
                             <input type="text" class="form-control" id="nlp-f-name" maxlength="120" placeholder="e.g. Power Ring Nov promo"></div>
+                        <div><label class="nlp-lbl" for="nlp-f-offer">Offer (optional)</label>
+                            <input type="text" class="form-control" id="nlp-f-offer" maxlength="120" placeholder="e.g. 2nd ring RM1,000 off"></div>
+                    </div>
+                    <div class="nlp-grid" id="nlp-f-window" hidden>
+                        <div><label class="nlp-lbl" for="nlp-f-from">Bought from (optional)</label>
+                            <input type="date" class="form-control" id="nlp-f-from" onchange="app.nlpFormSync()"></div>
+                        <div><label class="nlp-lbl" for="nlp-f-to">Bought to</label>
+                            <input type="date" class="form-control" id="nlp-f-to" onchange="app.nlpFormSync()"></div>
                     </div>
                     ${_nlp.canTeam ? `
                     <label class="nlp-lbl">Whose people?</label>
@@ -271,7 +290,8 @@
                     </div>` : ''}
                     <label class="nlp-lbl" for="nlp-f-remarks">Remarks (optional)</label>
                     <textarea class="form-control" id="nlp-f-remarks" rows="2" maxlength="500"></textarea>
-                    <div class="inv-sub">The CRM shows about 2.5× as many names as you ask for and ticks the best ones. People who asked not to be contacted are never listed.</div>
+                    <div class="nlp-match" id="nlp-f-match" aria-live="polite"></div>
+                    <div class="inv-sub" id="nlp-f-note"></div>
                 </div>
             </div>`;
         UI.showModal('New name list', html, [
@@ -313,15 +333,68 @@
         const ql = document.getElementById('nlp-f-qty-l'); if (ql) ql.textContent = team ? 'How many per agent?' : 'How many people?';
         const q = document.getElementById('nlp-f-qty');
         if (q) { q.max = team ? 50 : 200; if (team && Number(q.value) > 50) q.value = 9; }
+        // Who to include: counting purchases needs a product line; owners → Upgrade, never bought → Decide.
+        const whoSel = document.getElementById('nlp-f-who');
+        if (whoSel) {
+            const general = lineSel?.value === 'general';
+            [...whoSel.options].forEach(o => { o.disabled = general && o.value !== 'best'; });
+            if (general) whoSel.value = 'best';
+            const who = whoSel.value;
+            const owns = who === 'owns_1' || who === 'owns_any';
+            const win = document.getElementById('nlp-f-window'); if (win) win.hidden = !owns;
+            if (goalSel && whoSel.dataset.prev !== who && !goalSel.dataset.touched) {
+                const want = owns ? 'upgrade' : who === 'owns_none' ? 'decide' : null;
+                if (want && [...goalSel.options].some(o => o.value === want)) goalSel.value = want;
+            }
+            whoSel.dataset.prev = who;
+            const note = document.getElementById('nlp-f-note');
+            if (note) note.textContent = who === 'best'
+                ? 'The CRM shows about 2.5× as many names as you ask for and ticks the best ones. People who asked not to be contacted are never listed.'
+                : 'Everyone who matches is listed, best first. Counted per item: “A + B” in one sale counts 2; cancelled or refunded sales don’t count. People who asked not to be contacted are never listed.';
+        }
+        _previewSoon();
+    };
+    const _formPayload = () => {
+        const v = (id) => (document.getElementById(id)?.value || '').trim();
+        const focus = v('nlp-f-focus');
+        const who = v('nlp-f-who') || 'best';
+        const owns = who === 'owns_1' || who === 'owns_any';
+        return {
+            purpose: _radio('nlp-purpose') || 'promote', line: v('nlp-f-line'), goal: v('nlp-f-goal'),
+            focus: focus ? [Number(focus)] : [], scope: _radio('nlp-scope') || 'mine', who,
+            bought_from: owns ? v('nlp-f-from') || null : null, bought_to: owns ? v('nlp-f-to') || null : null,
+        };
+    };
+    // "N people match" under the form — the same pool the list is made from.
+    const _previewSoon = () => {
+        const box = document.getElementById('nlp-f-match');
+        if (!box) return;
+        clearTimeout(_nlp.prevTimer);
+        if (_radio('nlp-purpose') === 'event') { box.innerHTML = ''; return; }
+        box.innerHTML = '<span class="inv-when">Counting…</span>';
+        _nlp.prevTimer = setTimeout(_preview, 500);
+    };
+    const _preview = async () => {
+        const p = _formPayload();
+        const seq = (_nlp.prevSeq = (_nlp.prevSeq || 0) + 1);
+        let r;
+        try { r = await _rpc('name_list_preview', { p }); } catch (e) { r = { err: _err(e) }; }
+        const box = document.getElementById('nlp-f-match');
+        if (!box || seq !== _nlp.prevSeq) return;
+        if (r.err) { box.innerHTML = `<span class="inv-when">${esc(r.err)}</span>`; return; }
+        const team = p.scope === 'team', n = Number(r.match) || 0, a = Number(r.agents) || 0, h = Number(r.held) || 0;
+        box.innerHTML = `<b>${n}</b> ${n === 1 ? 'person matches' : 'people match'}${team ? ` · ${a} agent${a === 1 ? '' : 's'}` : ''}${h ? ` <span class="inv-when">· ${h} held back</span>` : ''}`;
+        const q = document.getElementById('nlp-f-qty');
+        if (q && !q.dataset.touched && (p.who === 'owns_1' || p.who === 'owns_any') && n > 0) {
+            q.value = Math.min(team ? Number(r.per_agent_max) || 1 : n, team ? 50 : 200);
+        }
     };
     const nlpCreate = async () => {
         if (_radio('nlp-purpose') === 'event') { nlpEvents(); return; }
         const v = (id) => (document.getElementById(id)?.value || '').trim();
-        const focus = v('nlp-f-focus');
         const p = {
-            purpose: _radio('nlp-purpose') || 'promote', line: v('nlp-f-line'), goal: v('nlp-f-goal'),
-            focus: focus ? [Number(focus)] : [], target_qty: Number(v('nlp-f-qty')), target_date: v('nlp-f-date') || null,
-            name: v('nlp-f-name') || null, remarks: v('nlp-f-remarks') || null, scope: _radio('nlp-scope') || 'mine',
+            ..._formPayload(), target_qty: Number(v('nlp-f-qty')), target_date: v('nlp-f-date') || null,
+            name: v('nlp-f-name') || null, remarks: v('nlp-f-remarks') || null, offer: v('nlp-f-offer') || null,
         };
         if (!p.target_qty || p.target_qty < 1) { UI.toast.error('How many people?'); return; }
         try {
@@ -445,7 +518,9 @@
                 </div>
                 <div class="inv-objs">
                     <span class="inv-obj">${esc(l.line_label || l.line)} · ${esc(NLP_GOALS[l.goal] || l.goal)}</span>
+                    ${_whoText(l) ? `<span class="inv-obj">${esc(_whoText(l))}</span>` : ''}
                     ${(l.focus_names || []).map(n => `<span class="inv-obj">Focus: ${esc(n)}</span>`).join('')}
+                    ${l.offer ? `<span class="inv-obj nlp-offer">🏷 ${esc(l.offer)}</span>` : ''}
                     <span class="inv-obj">${l.scope === 'team' ? `Team · ${l.target_qty} per agent` : `Target ${l.target_qty}`}</span>
                     ${l.target_date ? `<span class="inv-obj">By ${esc(_d(l.target_date))}</span>` : ''}
                     <span class="inv-obj">${l.mine ? 'Your list' : 'By ' + esc(l.owner_name || '')}</span>
@@ -465,7 +540,7 @@
                 ${rem.length ? `<details class="inv-agent nlp-more">
                     <summary><span class="inv-agent-n">Taken off (${rem.length})</span><span class="inv-agent-s">with the reason</span></summary>
                     ${rem.map(r => _rowHtml(r, d, work)).join('')}</details>` : ''}
-                ${!rows.length ? `<div class="nlp-empty">Nobody matches this line and goal yet${l.scope === 'team' ? ' in your team' : ''}. Try another goal, or add people yourself.</div>` : ''}
+                ${!rows.length ? `<div class="nlp-empty">Nobody matches this ${_whoText(l) ? 'rule' : 'line and goal'} yet${l.scope === 'team' ? ' in your team' : ''}. Try another ${_whoText(l) ? 'rule' : 'goal'}, or add people yourself.</div>` : ''}
             </div>`;
     };
 
@@ -507,6 +582,7 @@
         if (r.reply === 'interested') return { step: `Book a meeting${about}`, why: 'Said interested' };
         if (r.reply === 'no_reply') return { step: 'Try once more — a call this time', why: 'No reply yet' };
         if (r.contact_at) return { step: 'Get their answer', why: 'then press Reply…' };
+        if (l.offer && (!r.next_step_rule || r.next_step_rule === 'default')) return { step: `Offer: ${l.offer}`, why: r.next_step_why || '' };
         return r.next_step ? { step: r.next_step, why: r.next_step_why || '' } : null;
     };
     const _rowHtml = (r, d, work) => {
@@ -634,7 +710,8 @@
         const phone = _waPhone(r.phone);
         if (!phone) { UI.toast.error('No phone number on file'); return; }
         const me = _state.cu?.full_name || '';
-        const msg = `Hi ${String(r.name || '').trim()}，我是${me} 😊`;
+        const offer = String(_nlp.detail?.list?.offer || '').trim();
+        const msg = `Hi ${String(r.name || '').trim()}，我是${me} 😊${offer ? '\n' + offer : ''}`;
         window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
         const box = document.getElementById(`nl-form-${Number(id)}`);
         if (box) {
@@ -739,6 +816,8 @@
                     <div><label class="nlp-lbl" for="nlp-e-date">Target date</label>
                         <input type="date" class="form-control" id="nlp-e-date" value="${esc(l.target_date || '')}"></div>
                 </div>
+                <label class="nlp-lbl" for="nlp-e-offer">Offer</label>
+                <input type="text" class="form-control" id="nlp-e-offer" maxlength="120" value="${esc(l.offer || '')}" placeholder="e.g. 2nd ring RM1,000 off">
                 <label class="nlp-lbl" for="nlp-e-remarks">Remarks</label>
                 <textarea class="form-control" id="nlp-e-remarks" rows="2" maxlength="500">${esc(l.remarks || '')}</textarea>
                 <div class="inv-sub">A new number applies the next time you make a new version.</div>
@@ -750,7 +829,7 @@
     const nlpSaveEdit = async () => {
         const v = (id) => (document.getElementById(id)?.value || '').trim();
         try {
-            await _rpc('name_list_set', { p_list: _nlp.listId, p: { name: v('nlp-e-name'), target_qty: Number(v('nlp-e-qty')), target_date: v('nlp-e-date'), remarks: v('nlp-e-remarks') } });
+            await _rpc('name_list_set', { p_list: _nlp.listId, p: { name: v('nlp-e-name'), target_qty: Number(v('nlp-e-qty')), target_date: v('nlp-e-date'), remarks: v('nlp-e-remarks'), offer: v('nlp-e-offer') } });
             UI.hideModal();
             UI.toast.success('Saved');
             _nlp.index = null;

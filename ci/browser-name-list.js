@@ -4,7 +4,8 @@
  *
  * Mock login + fake RPCs (nothing reaches Supabase): the sidebar tab sits right
  * after Prospect / Customer (admin + agent order), the page and its 3 tabs, New
- * list (purpose → goal choices, payload), a list's rows (ticked / suggested /
+ * list (purpose → goal choices, payload), Who to include (bought exactly 1 /
+ * 1+ / never, live count, bought-between, offer → next step + WhatsApp), a list's rows (ticked / suggested /
  * taken off, Do not contact, contacted-often warning, next step, progress, team
  * groups), every row action → the right RPC + arguments, take-off needs a
  * reason, add a person → warning → Add anyway, Start list, an old version is
@@ -48,7 +49,7 @@ const installFakes = () => {
         owner_id: 1, owner_name: 'System Admin', mine: true, can_manage: true,
     }, o);
     const detail = (ver) => ({
-        list: list({}),
+        list: list(window.__nlOwn ? { who: 'owns_1', bought_from: '2026-01-01', bought_to: '2026-06-30', offer: '2nd ring RM1,000 off' } : {}),
         version: { no: ver || 2, latest: !ver || ver === 2, held: { do_not_invite: 2, paused: 1 }, candidates: 9, offered: 6, picked: 3 },
         versions: [{ no: 2, generated_at: '2026-11-03T10:00:00Z', by: 'System Admin' }, { no: 1, generated_at: '2026-11-01T10:00:00Z', by: 'System Admin' }],
         counts: { picked: 3, contacted: 1, replied: 1, interested: 1, met: 0, closed: 1, revenue: 3800, closed_after_contact: 1 },
@@ -74,6 +75,7 @@ const installFakes = () => {
             case 'name_list_index': return { data: { lists: window.__nl.index, can_team: true }, error: null };
             case 'name_list_get': return { data: detail(args.p_version), error: null };
             case 'name_list_create': return { data: { ok: true, id: 11, version: 1 }, error: null };
+            case 'name_list_preview': return { data: { match: 58, held: 1, agents: 8, per_agent_max: 31 }, error: null };
             case 'name_list_add': return { data: args.p_force ? { ok: true, id: 107 } : { ok: false, warn: 'Contacted 2× in the last 30 days' }, error: null };
             case 'event_invite_results': return { data: [{ activity_id: 5, date: '2026-10-31', title: 'TEST 天心交喜', objectives: ['fengshui:decide'], reasons: {}, suggested: 33, added: 2, sent: 20, coming: 8, came: 6, closed: 1 }], error: null };
             case 'new_friend_list': case 'invite_smart_list': return { data: [], error: null };
@@ -200,7 +202,8 @@ async function main() {
         await page.waitForFunction(() => !!document.querySelector('.nlp-detail'), { timeout: 15000 });
         const cr = await last('name_list_create');
         check('create payload', cr && cr.args.p.line === 'fengshui' && cr.args.p.goal === 'upgrade' && cr.args.p.target_qty === 15
-            && JSON.stringify(cr.args.p.focus) === '[501]' && cr.args.p.target_date === '2026-11-30' && cr.args.p.scope === 'mine' && cr.args.p.purpose === 'promote', cr);
+            && JSON.stringify(cr.args.p.focus) === '[501]' && cr.args.p.target_date === '2026-11-30' && cr.args.p.scope === 'mine' && cr.args.p.purpose === 'promote'
+            && cr.args.p.who === 'best' && cr.args.p.bought_from === null, cr);
 
         console.log('\nOne list');
         const dt = await text();
@@ -291,6 +294,50 @@ async function main() {
         await shot('4-old-version');
         await page.evaluate(() => window.app.nlpBack());
         await sleep(400);
+
+        console.log('\nWho to include');
+        await page.evaluate(() => window.app.nlpNew());
+        await page.waitForSelector('#nlp-f-who option', { timeout: 10000 });
+        check('Who to include: 4 choices, best fit first', (await page.evaluate(() => [...document.querySelectorAll('#nlp-f-who option')].map(o => o.value).join(','))) === 'best,owns_1,owns_any,owns_none');
+        await page.evaluate(() => { document.getElementById('nlp-f-line').value = 'general'; window.app.nlpFormSync(); });
+        check('General line: only best fit (nothing to count)', await page.evaluate(() => [...document.querySelectorAll('#nlp-f-who option')].filter(o => !o.disabled).map(o => o.value).join(',') === 'best'));
+        await page.evaluate(() => {
+            document.getElementById('nlp-f-line').value = 'ring'; window.app.nlpFormSync();
+            document.getElementById('nlp-f-who').value = 'owns_1'; window.app.nlpFormSync();
+        });
+        check('Bought exactly 1 → Upgrade goal + "bought between" shown', await page.evaluate(() => document.getElementById('nlp-f-goal').value === 'upgrade' && !document.getElementById('nlp-f-window').hidden));
+        await page.waitForFunction(() => document.getElementById('nlp-f-match')?.innerText.includes('58'), { timeout: 5000 });
+        const pv = await last('name_list_preview');
+        check('live count: asks for the rule, shows "58 people match"', pv && pv.args.p.who === 'owns_1' && pv.args.p.line === 'ring' && pv.args.p.goal === 'upgrade'
+            && (await page.evaluate(() => document.getElementById('nlp-f-match').innerText)).includes('58 people match'), pv);
+        check('How many fills in with the match count', await page.evaluate(() => document.getElementById('nlp-f-qty').value === '58'));
+        await shot('2b-who');
+        await page.evaluate(() => {
+            document.getElementById('nlp-f-from').value = '2026-01-01'; document.getElementById('nlp-f-to').value = '2026-06-30';
+            document.getElementById('nlp-f-offer').value = '2nd ring RM1,000 off'; window.app.nlpFormSync();
+        });
+        await clickText('#global-modal-overlay button', 'Find the people');
+        await page.waitForFunction(() => !!document.querySelector('.nlp-detail'), { timeout: 15000 });
+        const cw = await last('name_list_create');
+        check('create payload: rule, window, offer, count', cw && cw.args.p.who === 'owns_1' && cw.args.p.bought_from === '2026-01-01' && cw.args.p.bought_to === '2026-06-30'
+            && cw.args.p.offer === '2nd ring RM1,000 off' && cw.args.p.target_qty === 58 && cw.args.p.line === 'ring', cw);
+        await page.evaluate(() => { window.__nlOwn = true; return window.app.nlpOpen(11); });
+        await page.waitForFunction(() => document.querySelector('.nlp-detail')?.innerText.includes('RM1,000'), { timeout: 10000 });
+        const hd = await text();
+        check('header: rule + window + offer', hd.includes('Bought exactly 1 · bought 1 Jan 2026 – 30 Jun 2026') && hd.includes('🏷 2nd ring RM1,000 off'), hd.slice(0, 400));
+        check('next step: untouched row → the offer', (await nextOf(104)).includes('Offer: 2nd ring RM1,000 off'), await nextOf(104));
+        check('next step: progress still wins over the offer', (await nextOf(102)).includes('Get their answer'), await nextOf(102));
+        await page.evaluate(() => { window.__opened = []; window.app.nlpWhatsApp(102); });
+        check('WhatsApp opener carries the offer', await page.evaluate(() => decodeURIComponent(window.__opened[0] || '').includes('2nd ring RM1,000 off')));
+        await page.evaluate(() => window.app.nlpEdit());
+        check('Edit shows the offer', await page.evaluate(() => document.getElementById('nlp-e-offer')?.value === '2nd ring RM1,000 off'));
+        await page.evaluate(() => { document.getElementById('nlp-e-offer').value = '2nd ring RM800 off'; });
+        await clickText('#global-modal-overlay button', 'Save');
+        await sleep(400);
+        const se = await last('name_list_set');
+        check('Edit saves the offer', se && se.args.p.offer === '2nd ring RM800 off', se);
+        await page.evaluate(() => { window.__nlOwn = false; window.app.nlpBack(); });
+        await sleep(300);
 
         console.log('\nWho to Focus + Results');
         await page.evaluate(() => window.app.nlpTab('focus'));
