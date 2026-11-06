@@ -49,6 +49,11 @@
 -- directly. Left as they are.
 --
 -- Undo: 2026-11-06_report_rpcs_revoke_anon_UNDO.sql
+--
+-- APPLIED live 2026-11-06 (owner OK). Re-probe with the publishable key: all nine
+-- answer 42501. As role authenticated with a real login: L1/L2 still gets
+-- 216 purchases / 927 activities / 983 new prospects / 14 sales agents; an L12
+-- agent gets only their own rows. Server key still gets 216 purchases.
 
 begin;
 
