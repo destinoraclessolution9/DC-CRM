@@ -422,6 +422,58 @@ async function main() {
         await sleep(300);
         check('phone: tap says the day', (await toastsNow(lockPhone)).some(t => t.startsWith('info: Cancel period ended on')), await toastsNow(lockPhone));
         if (SHOTS) await lockPhone.screenshot({ path: path.join(SHOTS, '9-phone-cps-locked.png') });
+
+        // 🚫 Cancel CPS on the phone's day list (2026-11-06).
+        console.log('\nPhone day list');
+        await lockPhone.evaluate(async () => {
+            window.UI.hideModal();
+            await window._loadChunk('chunks/script-mobile.min.js');
+            await window.app.showMobileCalendarView(document.getElementById('content-viewport'));
+        });
+        await sleep(800);
+        const dayOf = (id) => lockPhone.evaluate((i) => String(window.__db.activities.find(a => a.id === i).activity_date).slice(0, 10), id);
+        const openDay = async (id) => { await lockPhone.evaluate((d) => window.app.mcalDayClick(d), await dayOf(id)); await sleep(500); };
+        const dayPill = () => lockPhone.evaluate(() => {
+            const b = [...document.querySelectorAll('#global-modal-overlay .mcal-ds-acts button')].find(x => x.textContent.includes('Cancel CPS'));
+            if (!b) return null;
+            const r = b.getBoundingClientRect();
+            return { disabled: b.getAttribute('aria-disabled'), opacity: Number(getComputedStyle(b).opacity), seen: r.width > 0 && r.right <= window.innerWidth };
+        });
+        const tapDayPill = () => lockPhone.evaluate(() => {
+            window.__toasts.length = 0;
+            [...document.querySelectorAll('#global-modal-overlay .mcal-ds-acts button')].find(x => x.textContent.includes('Cancel CPS')).click();
+        });
+        await openDay(902);
+        const dOpen = await dayPill();
+        check('day list: open CPS has the button', dOpen && dOpen.disabled === null && dOpen.opacity > 0.9, dOpen);
+        check('day list: button fully on screen', dOpen && dOpen.seen, dOpen);
+        if (SHOTS) await lockPhone.screenshot({ path: path.join(SHOTS, '10-phone-day-list-cancel.png') });
+        await tapDayPill();
+        await sleep(800);
+        check('day list: tap opens the cancel form', await lockPhone.evaluate(() => !!document.getElementById('cps-cancel-reason')));
+        await lockPhone.evaluate(() => [...document.querySelectorAll('#global-modal-overlay button')].find(x => x.textContent.trim() === 'Back').click());
+        await sleep(500);
+        check('day list: Back returns to the day', await lockPhone.evaluate(() => !!document.querySelector('#global-modal-overlay .mcal-ds-row') && !document.getElementById('cps-cancel-reason')));
+        await tapDayPill();
+        await sleep(800);
+        await lockPhone.evaluate(() => {
+            window.__rpc.length = 0; window.__toasts.length = 0;
+            document.getElementById('cps-cancel-reason').value = 'clash';
+            [...document.querySelectorAll('#global-modal-overlay button')].find(x => x.textContent.trim() === 'Cancel CPS').click();
+        });
+        await sleep(800);
+        check('day list: cancel sent', (await lockPhone.evaluate(() => window.__rpc.slice())).includes('cps_cancel'), await lockPhone.evaluate(() => window.__rpc.slice()));
+        check('day list: told it moved', (await toastsNow(lockPhone)).includes('success: CPS cancelled. Moved to New Friends.'), await toastsNow(lockPhone));
+        await openDay(901);
+        const dLocked = await dayPill();
+        check('day list: locked CPS greyed', dLocked && dLocked.disabled === 'true' && dLocked.opacity < 0.7, dLocked);
+        await tapDayPill();
+        await sleep(300);
+        check('day list: locked tap says the day', (await toastsNow(lockPhone)).some(t => t.startsWith('info: Cancel period ended on')), await toastsNow(lockPhone));
+        check('day list: locked tap opens no form', !(await lockPhone.evaluate(() => !!document.getElementById('cps-cancel-reason'))));
+        await openDay(903);
+        check('day list: CPS with minutes has no button', (await dayPill()) === null);
+        check('day list: other buttons still there', await lockPhone.evaluate(() => ['Edit', 'Brief', 'Minutes', 'Closing'].every(l => [...document.querySelectorAll('#global-modal-overlay .mcal-ds-acts button')].some(b => b.textContent.includes(l)))));
         await lockPhone.close();
 
         const real = pageErrors.filter(e => !/supabase|Failed to fetch|fetch/i.test(e));

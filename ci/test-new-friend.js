@@ -247,6 +247,40 @@ const mobile = read('chunks/script-mobile.js');
         check('over a year end', ccBox.ended({ activity_date: '2026-12-25' }), '7 Jan');
         check('no date: not locked', ccBox.ended({ activity_date: null }), null);
         check('bad date: not locked', ccBox.ended({ activity_date: 'soon' }), null);
+        // ── 🚫 Cancel CPS on the phone's day list (2026-11-06) ──
+        // Its two checks are copies (the day list draws before the calendar
+        // chunk loads): they must answer exactly like the pop-up's.
+        const mc = slice(mobile, 'const _mcalCpsHappened =', '// Day-sheet action pills.');
+        const mcBox = { console };
+        vm.createContext(mcBox);
+        vm.runInContext(mc + '\nthis.happened = _mcalCpsHappened; this.ended = _mcalCpsCancelEnded;', mcBox);
+        const hCases = [{}, { meeting_minutes: null }, { summary: 'booked' }, { note_key_points: 'x' }, { note_needs: 'x' }, { note_pain_points: 'x' },
+            { note_outcome: 'x' }, { next_action: 'x' }, { is_closing: true }, { completed_at: '2026-11-01' }, { meeting_minutes: { background: 'x' } },
+            { meeting_minutes: { advisor: 'x' } }, { meeting_minutes: { reaction: 'x' } }, { meeting_minutes: { other: 'x' } }];
+        check('phone: happened matches the pop-up', hCases.every(c => mcBox.happened(c) === ccBox.happened(c)));
+        const eDates = ['2026-11-01', '2026-11-02', '2026-11-07', '2026-12-25', '2026-11-01T00:00:00', null, 'soon', '2026-02-28'];
+        for (const iso of ['2026-11-14T15:59:00Z', '2026-11-14T16:00:00Z', '2026-11-20T16:00:00Z', '2027-02-01T00:00:00Z']) {
+            vm.runInContext(`Date.now = () => ${Date.parse(iso)}`, ccBox);
+            vm.runInContext(`Date.now = () => ${Date.parse(iso)}`, mcBox);
+            check(`phone: cancel period matches the pop-up at ${iso}`, eDates.every(d => mcBox.ended({ activity_date: d }) === ccBox.ended({ activity_date: d })));
+        }
+        vm.runInContext(`Date.now = () => ${Date.parse('2026-11-06T04:00:00Z')}`, mcBox);
+        check('phone: 7 Nov CPS open on 6 Nov', mcBox.ended({ activity_date: '2026-11-07' }), null);
+        check('phone: 7 Nov CPS last day 20 Nov', (vm.runInContext(`Date.now = () => ${Date.parse('2026-11-21T00:00:00Z')}`, mcBox), mcBox.ended({ activity_date: '2026-11-07' })), '20 Nov');
+        const sheet = slice(mobile, 'const _pillStyle = (bg, fg)', 'return `\n                <div class="mcal-ds-row"');
+        check('phone: only a CPS with a prospect, not yet happened', sheet.includes("if (type === 'CPS' && a.prospect_id && !_mcalCpsHappened(a))"));
+        check('phone: open pill goes to the cancel form', sheet.includes("_pill('cancel_cps', 'fa-ban', 'Cancel CPS'"));
+        const phoneGrey = sheet.match(/_endedOn\s*\? `([^`]*)`/)?.[1] || '';
+        check('phone: locked pill says why', phoneGrey.includes("UI.toast.info('Cancel period ended on ${_endedOn}')"));
+        check('phone: locked pill opens no form', !phoneGrey.includes('mcalActivityAction') && phoneGrey.includes('aria-disabled="true"'));
+        check('phone: a fifth pill wraps, four never do', sheet.includes("flex-wrap:${_cancelPill ? 'wrap' : 'nowrap'}"));
+        check('phone: pill row carries the day', sheet.includes("app.mcalActivityAction('${kind}', ${Number(a.id)}, ${_entityId ? Number(_entityId) : 'null'}, '${dateStr}')"));
+        check('phone: tap opens the cancel form, Back to the day', mobile.includes("else if (kind === 'cancel_cps') await a.openCancelCps(activityId, { backDay: dateStr });"));
+        ccBox.open(56, { backDay: '2026-11-07' });
+        check('from the day list: Back returns to that day', ccBox.modal.buttons[0].action, "app.mcalDayClick('2026-11-07')");
+        ccBox.open(57, { backDay: "x');alert(1);('" });
+        check('a bad day is ignored', ccBox.modal.buttons[0].action, 'app.viewActivityDetails(57)');
+
         const greyBtn = calendar.match(/_cpsCancelEndedOn\s*\? `([^`]*)`/)?.[1] || '';
         check('locked button says why', greyBtn.includes("UI.toast.info('Cancel period ended on ${_cpsCancelEndedOn}')"));
         check('locked button opens no form', !greyBtn.includes('openCancelCps'));

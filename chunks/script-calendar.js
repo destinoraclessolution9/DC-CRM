@@ -8457,7 +8457,10 @@
         if (today <= last.toISOString().slice(0, 10)) return null;
         return last.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
     };
-    const openCancelCps = (activityId) => {
+    const openCancelCps = (activityId, opts = {}) => {
+        // Opened from the phone's day list: Back returns to that day.
+        const backDay = /^\d{4}-\d{2}-\d{2}$/.test(String(opts.backDay || '')) ? opts.backDay : null;
+        const backAction = backDay ? `app.mcalDayClick('${backDay}')` : `app.viewActivityDetails(${activityId})`;
         UI.showModal('🚫 Cancel CPS', `
             <p style="margin:0 0 12px;font-size:14px;">This removes the CPS from the calendar and the CPS count, and moves the person to 🌱 New Friends so nobody forgets to book again. Got a new date? Use <strong>Edit</strong> instead.</p>
             <div class="form-group">
@@ -8471,7 +8474,7 @@
                 <label>Note</label>
                 <textarea id="cps-cancel-note" class="form-control" rows="2" placeholder="Optional"></textarea>
             </div>`, [
-            { label: 'Back', type: 'secondary', action: `app.viewActivityDetails(${activityId})` },
+            { label: 'Back', type: 'secondary', action: backAction },
             { label: 'Cancel CPS', type: 'primary', action: `(async () => { await app.confirmCancelCps(${activityId}); })()` },
         ]);
     };

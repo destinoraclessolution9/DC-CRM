@@ -3495,16 +3495,30 @@
             // their leader (_mcalOwned covers co-agents + the visible downline).
             const _entityId = a.prospect_id || a.customer_id;
             const _isMeetup = _MCAL_MEETUP_TYPES.includes(type) && !!_entityId;
+            const _pillStyle = (bg, fg) => `display:inline-flex;align-items:center;gap:4px;flex-shrink:0;white-space:nowrap;height:28px;padding:0 10px;border:none;border-radius:14px;background:${bg};color:${fg};font-size:11.5px;font-weight:600;cursor:pointer;`;
             const _pill = (kind, icon, label, bg, fg) =>
-                `<button onclick="event.stopPropagation();app.mcalActivityAction('${kind}', ${Number(a.id)}, ${_entityId ? Number(_entityId) : 'null'})" style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;white-space:nowrap;height:28px;padding:0 10px;border:none;border-radius:14px;background:${bg};color:${fg};font-size:11.5px;font-weight:600;cursor:pointer;"><i class="fas ${icon}" style="font-size:10px;"></i>${label}</button>`;
+                `<button onclick="event.stopPropagation();app.mcalActivityAction('${kind}', ${Number(a.id)}, ${_entityId ? Number(_entityId) : 'null'}, '${dateStr}')" style="${_pillStyle(bg, fg)}"><i class="fas ${icon}" style="font-size:10px;"></i>${label}</button>`;
+            // 🚫 Cancel CPS (owner 2026-11-06): same button as the CPS pop-up, so
+            // "no new date yet" is one tap from the day list. Greyed once the
+            // 13-day cancel period is over; gone once the CPS has happened.
+            let _cancelPill = '';
+            if (type === 'CPS' && a.prospect_id && !_mcalCpsHappened(a)) {
+                const _endedOn = _mcalCpsCancelEnded(a);
+                _cancelPill = _endedOn
+                    ? `<button aria-disabled="true" onclick="event.stopPropagation();UI.toast.info('Cancel period ended on ${_endedOn}')" style="${_pillStyle('#F3F4F6', '#6B7280')}opacity:.6;cursor:not-allowed;"><i class="fas fa-ban" style="font-size:10px;"></i>Cancel CPS</button>`
+                    : _pill('cancel_cps', 'fa-ban', 'Cancel CPS', '#FEE2E2', '#B91C1C');
+            }
             // One full-width row under the card (owner 2026-10-26): all four
-            // fit on a phone; a very narrow screen scrolls it sideways, never wraps.
+            // fit on a phone; a very narrow screen scrolls it sideways, never
+            // wraps. A fifth (Cancel CPS) wraps to a second line instead of
+            // hiding off the edge.
             const actionRow = owned
-                ? `<div class="mcal-ds-acts" style="display:flex;flex-wrap:nowrap;gap:6px;margin-top:8px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;">
+                ? `<div class="mcal-ds-acts" style="display:flex;flex-wrap:${_cancelPill ? 'wrap' : 'nowrap'};gap:6px;margin-top:8px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;">
                         ${_pill('edit', 'fa-pen', 'Edit', '#FEF3C7', '#B45309')}
                         ${_entityId ? _pill('brief', 'fa-book-open', 'Brief', '#FCE7F3', '#BE185D') : ''}
                         ${_isMeetup ? _pill('minutes', 'fa-sticky-note', 'Minutes', '#E0E7FF', '#4338CA') : ''}
                         ${_isMeetup ? _pill('closing', 'fa-clipboard-check', 'Closing', '#D1FAE5', '#047857') : ''}
+                        ${_cancelPill}
                    </div>`
                 : '';
             return `
@@ -3536,10 +3550,28 @@
     // Meet-up types that get Minutes / Closing — mirrors _MEETUP_TYPES in the
     // desktop Actions panel (script-calendar viewActivityDetails).
     const _MCAL_MEETUP_TYPES = ['CPS','FTF','FSA','GR','XG','CALL','EMAIL','WHATSAPP','EVENT_CLOSING'];
-    // Day-sheet action pills. The three handlers live in the calendar chunk,
+    // Cancel CPS checks — copies of _cpsHappened / _cpsCancelEnded in
+    // script-calendar (the day list draws before that chunk loads; ci/test-new-friend.js
+    // keeps the two in step). The month list doesn't load every minutes field,
+    // so the server (cps_cancel) has the last word and says why if it refuses.
+    const _mcalCpsHappened = (a) => {
+        const mm = a.meeting_minutes || {};
+        return !!(a.note_key_points || a.note_needs || a.note_pain_points || a.note_outcome || a.next_action
+            || a.is_closing || a.completed_at || mm.background || mm.advisor || mm.reaction);
+    };
+    // Last day to cancel = CPS date + 13 (Malaysia calendar). Returns it once passed, else null.
+    const _mcalCpsCancelEnded = (a) => {
+        const last = new Date(`${String(a.activity_date).slice(0, 10)}T00:00:00Z`);
+        if (isNaN(last)) return null;
+        last.setUTCDate(last.getUTCDate() + 13);
+        const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+        if (today <= last.toISOString().slice(0, 10)) return null;
+        return last.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+    };
+    // Day-sheet action pills. The handlers live in the calendar chunk,
     // which the mobile calendar never loads on its own (and editActivityTiming
     // has no lazy stub), so load it first. Never-dead-tap contract as mcalOpenEvent.
-    const mcalActivityAction = async (kind, activityId, entityId) => {
+    const mcalActivityAction = async (kind, activityId, entityId, dateStr) => {
         try { UI.hideModal(); } catch (_) { /* intentional: best-effort modal cleanup */ }
         try {
             if (typeof window._loadChunk === 'function') await window._loadChunk('chunks/script-calendar.min.js');
@@ -3549,6 +3581,8 @@
             // Brief = last meeting's minutes + discussion papers, read before meeting.
             else if (kind === 'brief') await a.openMeetupHistoryModal(entityId);
             else if (kind === 'closing') await a.openMeetingOutcomeModal(activityId);
+            // Back on the cancel form returns to this day's list.
+            else if (kind === 'cancel_cps') await a.openCancelCps(activityId, { backDay: dateStr });
         } catch (e) {
             try {
                 localStorage.setItem('mcal-last-error', JSON.stringify({
