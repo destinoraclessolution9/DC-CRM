@@ -434,19 +434,23 @@ async function main() {
         const dayOf = (id) => lockPhone.evaluate((i) => String(window.__db.activities.find(a => a.id === i).activity_date).slice(0, 10), id);
         const openDay = async (id) => { await lockPhone.evaluate((d) => window.app.mcalDayClick(d), await dayOf(id)); await sleep(500); };
         const dayPill = () => lockPhone.evaluate(() => {
-            const b = [...document.querySelectorAll('#global-modal-overlay .mcal-ds-acts button')].find(x => x.textContent.includes('Cancel CPS'));
+            const b = document.querySelector('#global-modal-overlay .mcal-ds-acts button[aria-label="Cancel CPS"]');
             if (!b) return null;
             const r = b.getBoundingClientRect();
-            return { disabled: b.getAttribute('aria-disabled'), opacity: Number(getComputedStyle(b).opacity), seen: r.width > 0 && r.right <= window.innerWidth };
+            const tops = [...b.parentElement.querySelectorAll('button')].map(x => Math.round(x.getBoundingClientRect().top));
+            return { disabled: b.getAttribute('aria-disabled'), opacity: Number(getComputedStyle(b).opacity), seen: r.width > 0 && r.right <= window.innerWidth,
+                oneLine: new Set(tops).size === 1, n: tops.length, text: b.textContent.trim(), w: Math.round(r.width) };
         });
         const tapDayPill = () => lockPhone.evaluate(() => {
             window.__toasts.length = 0;
-            [...document.querySelectorAll('#global-modal-overlay .mcal-ds-acts button')].find(x => x.textContent.includes('Cancel CPS')).click();
+            document.querySelector('#global-modal-overlay .mcal-ds-acts button[aria-label="Cancel CPS"]').click();
         });
         await openDay(902);
         const dOpen = await dayPill();
         check('day list: open CPS has the button', dOpen && dOpen.disabled === null && dOpen.opacity > 0.9, dOpen);
         check('day list: button fully on screen', dOpen && dOpen.seen, dOpen);
+        check('day list: icon only', dOpen && dOpen.text === '' && dOpen.w <= 30, dOpen);
+        check('day list: all five on one line', dOpen && dOpen.n === 5 && dOpen.oneLine, dOpen);
         if (SHOTS) await lockPhone.screenshot({ path: path.join(SHOTS, '10-phone-day-list-cancel.png') });
         await tapDayPill();
         await sleep(800);

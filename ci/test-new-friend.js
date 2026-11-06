@@ -269,11 +269,16 @@ const mobile = read('chunks/script-mobile.js');
         check('phone: 7 Nov CPS last day 20 Nov', (vm.runInContext(`Date.now = () => ${Date.parse('2026-11-21T00:00:00Z')}`, mcBox), mcBox.ended({ activity_date: '2026-11-07' })), '20 Nov');
         const sheet = slice(mobile, 'const _pillStyle = (bg, fg)', 'return `\n                <div class="mcal-ds-row"');
         check('phone: only a CPS with a prospect, not yet happened', sheet.includes("if (type === 'CPS' && a.prospect_id && !_mcalCpsHappened(a))"));
-        check('phone: open pill goes to the cancel form', sheet.includes("_pill('cancel_cps', 'fa-ban', 'Cancel CPS'"));
+        const phoneOpen = sheet.match(/_endedOn\s*\?\s*`[^`]*`\s*:\s*`([^`]*)`/)?.[1] || '';
+        check('phone: open pill goes to the cancel form', phoneOpen.includes("app.mcalActivityAction('cancel_cps', ${Number(a.id)}, ${Number(a.prospect_id)}, '${dateStr}')"));
         const phoneGrey = sheet.match(/_endedOn\s*\? `([^`]*)`/)?.[1] || '';
         check('phone: locked pill says why', phoneGrey.includes("UI.toast.info('Cancel period ended on ${_endedOn}')"));
         check('phone: locked pill opens no form', !phoneGrey.includes('mcalActivityAction') && phoneGrey.includes('aria-disabled="true"'));
-        check('phone: a fifth pill wraps, four never do', sheet.includes("flex-wrap:${_cancelPill ? 'wrap' : 'nowrap'}"));
+        // Icon only (owner 2026-11-06): the row stays on one line.
+        const iconOnly = (b) => /<i class="fas fa-ban"[^>]*><\/i><\/button>$/.test(b) && !/<\/i>[^<]+<\/button>$/.test(b) && b.includes('aria-label="Cancel CPS"');
+        check('phone: open pill is icon only, named for screen readers', iconOnly(phoneOpen));
+        check('phone: locked pill is icon only, named for screen readers', iconOnly(phoneGrey));
+        check('phone: the row never wraps', sheet.includes('display:flex;flex-wrap:nowrap;') && !/flex-wrap:\$\{/.test(sheet));
         check('phone: pill row carries the day', sheet.includes("app.mcalActivityAction('${kind}', ${Number(a.id)}, ${_entityId ? Number(_entityId) : 'null'}, '${dateStr}')"));
         check('phone: tap opens the cancel form, Back to the day', mobile.includes("else if (kind === 'cancel_cps') await a.openCancelCps(activityId, { backDay: dateStr });"));
         ccBox.open(56, { backDay: '2026-11-07' });

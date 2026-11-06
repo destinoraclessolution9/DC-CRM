@@ -3499,21 +3499,22 @@
             const _pill = (kind, icon, label, bg, fg) =>
                 `<button onclick="event.stopPropagation();app.mcalActivityAction('${kind}', ${Number(a.id)}, ${_entityId ? Number(_entityId) : 'null'}, '${dateStr}')" style="${_pillStyle(bg, fg)}"><i class="fas ${icon}" style="font-size:10px;"></i>${label}</button>`;
             // 🚫 Cancel CPS (owner 2026-11-06): same button as the CPS pop-up, so
-            // "no new date yet" is one tap from the day list. Greyed once the
-            // 13-day cancel period is over; gone once the CPS has happened.
+            // "no new date yet" is one tap from the day list. Icon only (owner:
+            // keep the row on one line). Greyed once the 13-day cancel period is
+            // over; gone once the CPS has happened.
             let _cancelPill = '';
             if (type === 'CPS' && a.prospect_id && !_mcalCpsHappened(a)) {
                 const _endedOn = _mcalCpsCancelEnded(a);
+                const _iconOnly = 'width:28px;padding:0;justify-content:center;';
                 _cancelPill = _endedOn
-                    ? `<button aria-disabled="true" onclick="event.stopPropagation();UI.toast.info('Cancel period ended on ${_endedOn}')" style="${_pillStyle('#F3F4F6', '#6B7280')}opacity:.6;cursor:not-allowed;"><i class="fas fa-ban" style="font-size:10px;"></i>Cancel CPS</button>`
-                    : _pill('cancel_cps', 'fa-ban', 'Cancel CPS', '#FEE2E2', '#B91C1C');
+                    ? `<button aria-disabled="true" aria-label="Cancel CPS" title="Cancel CPS" onclick="event.stopPropagation();UI.toast.info('Cancel period ended on ${_endedOn}')" style="${_pillStyle('#F3F4F6', '#6B7280')}${_iconOnly}opacity:.6;cursor:not-allowed;"><i class="fas fa-ban" style="font-size:13px;"></i></button>`
+                    : `<button aria-label="Cancel CPS" title="Cancel CPS" onclick="event.stopPropagation();app.mcalActivityAction('cancel_cps', ${Number(a.id)}, ${Number(a.prospect_id)}, '${dateStr}')" style="${_pillStyle('#FEE2E2', '#B91C1C')}${_iconOnly}"><i class="fas fa-ban" style="font-size:13px;"></i></button>`;
             }
-            // One full-width row under the card (owner 2026-10-26): all four
-            // fit on a phone; a very narrow screen scrolls it sideways, never
-            // wraps. A fifth (Cancel CPS) wraps to a second line instead of
-            // hiding off the edge.
+            // One full-width row under the card (owner 2026-10-26): all the
+            // buttons fit on one line; a very narrow screen scrolls it sideways,
+            // never wraps.
             const actionRow = owned
-                ? `<div class="mcal-ds-acts" style="display:flex;flex-wrap:${_cancelPill ? 'wrap' : 'nowrap'};gap:6px;margin-top:8px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;">
+                ? `<div class="mcal-ds-acts" style="display:flex;flex-wrap:nowrap;gap:6px;margin-top:8px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;">
                         ${_pill('edit', 'fa-pen', 'Edit', '#FEF3C7', '#B45309')}
                         ${_entityId ? _pill('brief', 'fa-book-open', 'Brief', '#FCE7F3', '#BE185D') : ''}
                         ${_isMeetup ? _pill('minutes', 'fa-sticky-note', 'Minutes', '#E0E7FF', '#4338CA') : ''}
