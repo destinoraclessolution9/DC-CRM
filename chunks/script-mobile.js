@@ -4037,6 +4037,7 @@
         pipelineStage: '',    // prospects only
         referral: '',         // prospects only: any | none | Consultant | Prospect | Customer
         newFriend: '',        // prospects only: '1' = 🌱 added at an event, no CPS yet
+        showClosed: '',       // prospects only: '1' = also list Unable to Serve / Dropped (F)
     };
     const _mpHasActiveFilters = () => Object.values(_mpFilters).some(v => v !== '' && v != null);
     const _mpActiveFilterCount = () => Object.values(_mpFilters).filter(v => v !== '' && v != null).length;
@@ -4239,6 +4240,12 @@
                 const s = String(r.status || '').toLowerCase();
                 return s !== 'converted' && s !== 'lost';
             });
+        }
+        // Unable to Serve + Dropped (F) are finished with: hidden unless the user
+        // searches a name/phone (so they can still be opened + revived) or picks
+        // Show in the filter sheet. Same rule as the desktop list + prospects_page.
+        if (_mpTab !== 'customers' && !searchTerm && !F.showClosed) {
+            rows = rows.filter(r => !(r.unable_to_serve || r.manual_grade === 'F'));
         }
         if (F.status) {
             rows = rows.filter(r => String(r.status || '').toLowerCase() === F.status.toLowerCase());
@@ -4637,6 +4644,13 @@
                     </select>
                 </div>
                 <div class="mp-filter-group">
+                    <label for="mpf-show-closed">Unable to Serve / Dropped (F)</label>
+                    <select id="mpf-show-closed" class="form-control">
+                        ${[['', 'Hidden (search a name to find one)'], ['1', 'Show them']]
+                            .map(([v, l]) => `<option value="${v}" ${_mpFilters.showClosed === v ? 'selected' : ''}>${l}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="mp-filter-group">
                     <label for="mpf-pipeline">Pipeline Stage</label>
                     <select id="mpf-pipeline" class="form-control">
                         <option value="">All Stages</option>
@@ -4666,6 +4680,7 @@
             pipelineStage: v('mpf-pipeline'),
             referral: v('mpf-referral'),
             newFriend: v('mpf-new-friend'),
+            showClosed: v('mpf-show-closed'),
         };
         // Sort lives outside _mpFilters (it narrows nothing, so it must not
         // reach the badge) — read it here and restart paging on any change.
@@ -4681,7 +4696,7 @@
     };
 
     const mpClearFilters = async () => {
-        _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '', referral: '', newFriend: '' };
+        _mpFilters = { status: '', agentId: '', mingGua: '', scoreMin: '', scoreMax: '', pipelineStage: '', referral: '', newFriend: '', showClosed: '' };
         _mpSort = _MP_SORT_DEFAULT;
         _mpPage = 1;
         UI.hideModal();

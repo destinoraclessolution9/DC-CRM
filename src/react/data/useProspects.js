@@ -9,7 +9,7 @@
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { bffError, bffRetry } from './bffError.js';
 
-async function fetchProspects({ q = '', gua = '', agent = '', sort = 'score', dir = 'desc', dormant = false, limit = 50, offset = 0 } = {}) {
+async function fetchProspects({ q = '', gua = '', agent = '', sort = 'score', dir = 'desc', dormant = false, closed = false, limit = 50, offset = 0 } = {}) {
     const sb = window.supabase;
     const { data } = sb && sb.auth ? await sb.auth.getSession() : { data: null };
     const token = data && data.session && data.session.access_token;
@@ -26,6 +26,7 @@ async function fetchProspects({ q = '', gua = '', agent = '', sort = 'score', di
     if (gua) p.set('gua', gua);
     if (agent) p.set('agent', String(agent));
     if (dormant) p.set('dormant', '1');
+    if (closed) p.set('closed', '1');
     const res = await fetch('/api/prospects?' + p.toString(), { headers: { Authorization: 'Bearer ' + token } });
     if (!res.ok) throw bffError(res.status, 'prospects');
     return res.json(); // { rows, count }

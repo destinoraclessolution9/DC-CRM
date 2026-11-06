@@ -3359,6 +3359,8 @@ class DataStore {
             p_sort_dir:          opts.sortDir ?? 'desc',
             p_limit:             opts.limit ?? 50,
             p_offset:            opts.offset ?? 0,
+            // Unable to Serve + Dropped (F): false hides them (a search still finds them).
+            p_include_closed:    opts.includeClosed ?? true,
         });
         if (error) throw error;
         // The RPC returns a single row shaped { rows: jsonb[], total: bigint }.

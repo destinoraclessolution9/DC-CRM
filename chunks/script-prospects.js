@@ -150,7 +150,7 @@ const _serverPage = async (table, opts = {}) => {
 // Resolves the visibility scope to a bigint[] (null = unrestricted for
 // admin/manager). Returns { data, count, used } or { used:false } on any
 // guard/error so renderProspectsTable cleanly falls back to its legacy path.
-const _serverProspectsPage = async ({ search, mingGua, agentFilter, includeDormant, sortField, sortDir, limit, offset }) => {
+const _serverProspectsPage = async ({ search, mingGua, agentFilter, includeDormant, includeClosed, sortField, sortDir, limit, offset }) => {
     try {
         let visibleAgentIds = null; // null = unrestricted (admin/manager)
         if (!isSystemAdmin(_state.cu)) {
@@ -166,6 +166,7 @@ const _serverProspectsPage = async ({ search, mingGua, agentFilter, includeDorma
             mingGua: mingGua || null,
             agentId: agentFilter ? Number(agentFilter) : null,
             includeDormant: !!includeDormant,
+            includeClosed:  !!includeClosed,
             sort:    sortMap[sortField] || 'score',
             sortDir: sortDir || 'desc',
             limit, offset,
@@ -293,6 +294,10 @@ const showProspectsView = async (container) => {
                         <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;user-select:none;" title="By default, prospects inactive for 500+ days are hidden. Type a name/phone in the search box to find them, or check this to load them all.">
                             <input type="checkbox" id="filter-include-dormant" onchange="app.filterProspects()" style="margin:0;">
                             Include dormant (500+ days)
+                        </label>
+                        <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer;user-select:none;" title="Unable to Serve and Dropped (F) prospects are hidden. Type a name/phone in the search box to find one, or check this to show them all.">
+                            <input type="checkbox" id="filter-show-closed" onchange="app.filterProspects()" style="margin:0;">
+                            Show Unable to Serve / Dropped (F)
                         </label>
                         <button class="btn primary" onclick="app.filterProspects()">Apply Filters</button>
                     </div>
@@ -622,6 +627,11 @@ const buildProspectRowHtml = (p, ctx) => {
         `;
 };
 
+// Unable to Serve + Dropped (F) are finished with, so the list hides them unless
+// the user searches a name/phone or ticks "Show Unable to Serve / Dropped (F)".
+// Same rule as the prospects_page RPC (p_include_closed) and the phone list.
+const _isClosedOutProspect = (p) => !!(p && (p.unable_to_serve || p.manual_grade === 'F'));
+
 const buildProspectsEmptyHtml = (searchQueryRaw, agentFilter, includeDormantToggle) => {
     const hint = searchQueryRaw
         ? `No prospects matched "<strong>${searchQueryRaw.replace(/</g, '&lt;')}</strong>". Dormant records were included in this search.`
@@ -629,7 +639,7 @@ const buildProspectsEmptyHtml = (searchQueryRaw, agentFilter, includeDormantTogg
             ? 'No prospects found for this agent.'
             : (includeDormantToggle
                 ? 'No prospects found. Click "Add Prospect" to create one.'
-                : 'No active prospects. Check "Include dormant" or type a name/phone to search older records.'));
+                : 'No active prospects. Check "Include dormant" or "Show Unable to Serve / Dropped (F)", or type a name/phone to search hidden records.'));
     return `<tr><td colspan="9" style="text-align:center; padding:40px;">${hint}</td></tr>`;
 };
 
@@ -754,6 +764,9 @@ const renderProspectsTable = async () => {
         }
     }
     const includeDormantToggle = document.getElementById('filter-include-dormant')?.checked || false;
+    const showClosedToggle = document.getElementById('filter-show-closed')?.checked || false;
+    // A search must still find Unable to Serve / Dropped (F) so they can be opened + revived.
+    const _showClosed = showClosedToggle || !!searchQueryRaw;
 
     // ── Instant skeleton paint (cold-load only) ────────────────────────
     // If the body is empty (first visit, no cache) the user otherwise
@@ -854,6 +867,7 @@ const renderProspectsTable = async () => {
                         // search older records" hint). Without this, phone/name searches on
                         // the React path silently miss prospects inactive > 500 days.
                         dormant: includeDormantToggle || !!agentFilter || !!searchQueryRaw,
+                        closed: _showClosed,
                         page: _prospectPage,
                     },
                     pageSize: _prospectPageSize,
@@ -888,6 +902,7 @@ const renderProspectsTable = async () => {
                 agentFilter,
                 // Search term → include dormant (same contract as the React path + legacy).
                 includeDormant: includeDormantToggle || !!agentFilter || !!searchQueryRaw,
+                includeClosed: _showClosed,
                 sortField: _sortField,
                 sortDir: _sortDirection,
                 limit: _prospectPageSize,
@@ -927,6 +942,9 @@ const renderProspectsTable = async () => {
             prospects = allProspects.filter(p => visibleIdSet.has(String(p.responsible_agent_id)));
         }
     }
+    // Server path already left them out. Filtering here (before the stats) keeps
+    // Total Prospects in step with the rows on screen.
+    if (!_usedServerP && !_showClosed) prospects = prospects.filter(p => !_isClosedOutProspect(p));
 
     // Per-page latest-activity lookup; populated after pagination below.
     const latestActivityByProspect = new Map();
@@ -1151,10 +1169,13 @@ const renderProspectsTable = async () => {
     // one-click path to reveal them. Only shown on the "plain list" path
     // (no search term, toggle off) — when searching or when the toggle is
     // on, the dormant set is already being considered, so no nudge needed.
-    const dormantNote = (!searchQueryRaw && !includeDormantToggle && !agentFilter)
+    const _hiddenKinds = [];
+    if (!searchQueryRaw && !includeDormantToggle && !agentFilter) _hiddenKinds.push('Prospects inactive 500+ days');
+    if (!_showClosed) _hiddenKinds.push(_hiddenKinds.length ? 'Unable to Serve / Dropped (F)' : 'Unable to Serve / Dropped (F) prospects');
+    const dormantNote = _hiddenKinds.length
         ? `<span style="color:var(--text-secondary);font-size:12px;margin-left:12px;">
              <i class="fas fa-moon" style="opacity:0.6;"></i>
-             Prospects inactive 500+ days are hidden. Search by name/phone to find them.
+             ${_hiddenKinds.join(' and ')} are hidden. Search by name/phone to find them.
            </span>`
         : '';
 
@@ -1671,7 +1692,8 @@ const updateProspectFilterBadge = () => {
     const agent  = document.getElementById('filter-agent')?.value || '';
     const referral = document.getElementById('filter-referral')?.value || '';
     const newFriend = document.getElementById('filter-new-friend')?.value || '';
-    const count  = [score, gua, status, agent, referral, newFriend].filter(Boolean).length;
+    const showClosed = !!document.getElementById('filter-show-closed')?.checked;
+    const count  = [score, gua, status, agent, referral, newFriend, showClosed].filter(Boolean).length;
     const existing = btn.querySelector('.filter-count-badge');
     if (existing) existing.remove();
     if (count > 0) {

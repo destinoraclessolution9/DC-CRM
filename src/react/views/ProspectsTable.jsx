@@ -182,6 +182,7 @@ export function ProspectsTable({ params, meta, pageSize = 50, onNavigate }) {
     const { data, isLoading, isError, error } = useProspects({
         q: params.q || '', gua: params.gua || '', agent: params.agent || '',
         sort: SORT_TO_BFF[sortField] || 'score', dir: sortDir, dormant: !!params.dormant,
+        closed: !!params.closed,
         limit: pageSize, offset: page * pageSize,
     });
 
@@ -226,7 +227,7 @@ export function ProspectsTable({ params, meta, pageSize = 50, onNavigate }) {
         // transient outage reads neutral+retryable, a genuine session expiry fatal.
         body = <tr><td colSpan="9" style={{ padding: 0 }}><ErrorState title="Couldn't load prospects" description={(error && error.message) || 'Failed to load prospects.'} retryable={!error || error.retryable} /></td></tr>;
     } else if (rows.length === 0) {
-        body = <tr><td colSpan="9" style={{ padding: 0 }}><EmptyState icon="fa-user-plus" title="No active prospects" description={'Check "Include dormant" or search a name / phone to find older records.'} /></td></tr>;
+        body = <tr><td colSpan="9" style={{ padding: 0 }}><EmptyState icon="fa-user-plus" title="No active prospects" description={'Check "Include dormant" or "Show Unable to Serve / Dropped (F)", or search a name / phone to find hidden records.'} /></td></tr>;
     } else {
         body = rows.map((p) => <Row key={p.id} p={p} meta={meta} selected={sel.has(Number(p.id))} onToggle={toggle} />);
     }

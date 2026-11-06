@@ -66,6 +66,9 @@ export default async function handler(req, res) {
   const gua     = String(Q.gua || '').trim().slice(0, 40);
   const agentId = Number.isFinite(Number.parseInt(String(Q.agent ?? ''), 10)) ? Number.parseInt(String(Q.agent), 10) : null;
   const dormant = Q.dormant === '1' || Q.dormant === 'true';
+  // Unable to Serve + Dropped (F) rows are hidden unless asked for (closed=1).
+  // A search term always includes them (the RPC handles that).
+  const closed  = Q.closed === '1' || Q.closed === 'true';
   const sort    = SORT_KEYS.has(String(Q.sort || '')) ? String(Q.sort) : 'score';
   const dir     = String(Q.dir || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
 
@@ -134,6 +137,7 @@ export default async function handler(req, res) {
         p_sort_dir:        dir,
         p_limit:           limit,
         p_offset:          offset,
+        p_include_closed:  closed,
       }),
     });
     if (!rpcRes.ok) return send(503, { error: 'query_unavailable', status: rpcRes.status });

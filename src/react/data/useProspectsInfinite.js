@@ -24,6 +24,7 @@ export async function fetchProspectsPage({ params = {}, pageParam = 0, limit = 5
     if (params.gua) p.set('gua', params.gua);
     if (params.agent) p.set('agent', String(params.agent));
     if (params.dormant) p.set('dormant', '1');
+    if (params.closed) p.set('closed', '1');
     const res = await fetch('/api/prospects?' + p.toString(), {
         headers: { Authorization: 'Bearer ' + token },
         signal,

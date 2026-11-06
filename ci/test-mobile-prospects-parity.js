@@ -52,7 +52,7 @@ const listHost = { innerHTML: '' };
 const sheet = {
     'mpf-sort': { value: '' }, 'mpf-status': { value: '' }, 'mpf-agent': { value: '' },
     'mpf-minggua': { value: '' }, 'mpf-score-min': { value: '' }, 'mpf-score-max': { value: '' },
-    'mpf-pipeline': { value: '' },
+    'mpf-pipeline': { value: '' }, 'mpf-show-closed': { value: '' },
 };
 const setSheet = (patch) => {
     for (const k of Object.keys(sheet)) sheet[k].value = '';
@@ -137,7 +137,14 @@ const SCORED = [
     { id: 2002, full_name: 'High', ming_gua: 'MG1', score: 900, status: 'active', responsible_agent_id: 7, updated_at: '2026-07-01T00:00:00Z' },
     { id: 2003, full_name: 'Mid',  ming_gua: 'MG1', score: 400, status: 'active', responsible_agent_id: 7, updated_at: '2026-07-02T00:00:00Z' },
 ];
-const ALL = [...PROSPECTS, ...SCORED];
+// Unable to Serve + Dropped (F): hidden from the list unless the user searches a
+// name/phone or picks Show in the filter sheet (owner 2026-11-06).
+const CLOSED_OUT = [
+    { id: 3001, full_name: 'Uts',    ming_gua: 'MG3', score: 50, status: 'active', unable_to_serve: true, responsible_agent_id: 7, updated_at: '2026-07-01T00:00:00Z' },
+    { id: 3002, full_name: 'GradeF', ming_gua: 'MG3', score: 40, status: 'active', manual_grade: 'F',     responsible_agent_id: 7, updated_at: '2026-07-01T00:00:00Z' },
+    { id: 3003, full_name: 'Open',   ming_gua: 'MG3', score: 30, status: 'active', manual_grade: 'B',     responsible_agent_id: 7, updated_at: '2026-07-01T00:00:00Z' },
+];
+const ALL = [...PROSPECTS, ...SCORED, ...CLOSED_OUT];
 
 window.AppDataStore = {
     getAll: async (table) => {
@@ -145,7 +152,8 @@ window.AppDataStore = {
         if (table === 'users') return [{ id: 7, full_name: 'Agent Seven', agent_code: 'A7' }];
         return [];
     },
-    searchProspects: async () => [],
+    // Server search stand-in: name match, dormant + closed-out rows included.
+    searchProspects: async (term) => ALL.filter(r => r.full_name.toLowerCase().includes(String(term).toLowerCase())).map(r => ({ ...r })),
     searchCustomers: async () => [],
 };
 global.AppDataStore = window.AppDataStore;
@@ -161,7 +169,7 @@ function loadChunk(file, names) {
     return window[key];
 }
 const M = loadChunk('chunks/script-mobile.js',
-    ['_mpRenderList', 'mpApplyFilters', 'mpClearFilters', 'mpLoadMore']);
+    ['_mpRenderList', 'mpApplyFilters', 'mpClearFilters', 'mpLoadMore', 'mpSearchInput']);
 
 // Names of the cards currently painted, in render order.
 // NOTE: the class must be anchored — a loose `mp-card-name[^"]*` also matches
@@ -189,10 +197,11 @@ const apply = async (patch) => { setSheet(patch); await M.mpApplyFilters(); };
     ok('lost prospect is NOT listed', !names.includes('P01'));
     ok('NULL-status prospect IS kept (never classified)', names.includes('P02'));
 
-    // The gap is EXACTLY the closed rows — nothing else got dropped.
+    // The gap is EXACTLY the closed rows — converted + lost + Unable to Serve +
+    // Dropped (F) — nothing else got dropped.
     await M.mpClearFilters();
     const unfilteredTotal = loadMore().total;
-    eq('unfiltered list drops exactly the 2 closed rows', unfilteredTotal, ALL.length - 2);
+    eq('unfiltered list drops exactly the 4 closed rows', unfilteredTotal, ALL.length - 4);
 
     // ── 2. …unless the user explicitly asks for them ────────────────────────
     await apply({ minggua: 'MG8', status: 'converted' });
@@ -200,6 +209,26 @@ const apply = async (patch) => { setSheet(patch); await M.mpApplyFilters(); };
     eq('…and it is the converted one', rendered()[0], 'P00');
     await apply({ minggua: 'MG8', status: 'lost' });
     eq('Status → Lost still surfaces lost rows', rendered().join(','), 'P01');
+
+    // ── 2b. Unable to Serve + Dropped (F) hidden by default (2026-11-06) ────
+    await apply({ minggua: 'MG3' });
+    eq('Unable to Serve + Dropped (F) are hidden by default', rendered().join(','), 'Open');
+    await apply({ minggua: 'MG3', 'show-closed': '1' });
+    eq('Show them brings both back, greyed, in score order', rendered().join(','), 'Uts,GradeF,Open');
+    ok('…still greyed out (name-unable)', (listHost.innerHTML.match(/mp-card-name name-unable/g) || []).length === 2);
+    await apply({ minggua: 'MG3', 'show-closed': '1', status: 'active' });
+    eq('Show + another filter still shows them', rendered().join(','), 'Uts,GradeF,Open');
+    await M.mpClearFilters();
+    ok('Clear hides them again', !rendered().includes('Uts') && !rendered().includes('GradeF'));
+    // A name search must still find them so they can be opened + revived.
+    M.mpSearchInput('uts');
+    await new Promise(r => setTimeout(r, 300));
+    eq('searching a name finds an Unable to Serve prospect', rendered().join(','), 'Uts');
+    M.mpSearchInput('gradef');
+    await new Promise(r => setTimeout(r, 300));
+    eq('searching a name finds a Dropped (F) prospect', rendered().join(','), 'GradeF');
+    M.mpSearchInput('');
+    await new Promise(r => setTimeout(r, 300));
 
     // ── 3. Sort: default is desktop's Score (High → Low) ────────────────────
     await apply({ minggua: 'MG1' });
