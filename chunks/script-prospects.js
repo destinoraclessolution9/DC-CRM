@@ -3339,7 +3339,7 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             ${isImage ? `
                 <div style="margin-top:10px;text-align:center;">
                     <img loading="lazy" decoding="async" data-attach-src="${escapeHtml(cpsUrl)}" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt="CPS Form" style="max-width:100%;max-height:280px;border-radius:8px;border:1px solid var(--border);cursor:pointer;" onclick="window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(cpsUrl))}')">
-                    <div style="font-size:11px;color:var(--gray-400);margin-top:4px;">Tap to view full size</div>
+                    <div style="margin-top:4px;"><a href="#" class="pv-cps-open" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(cpsUrl))}')" style="font-size:12px;cursor:pointer;"><i class="fas fa-image"></i> Tap to view full size</a></div>
                 </div>
             ` : `
                 <div style="margin-top:8px;">
@@ -3419,6 +3419,14 @@ const switchProspectTab = async (tab, prospectId, btn, containerOverride) => {
             <div class="pv-row"><span class="pv-lbl">Created</span><span class="pv-val">${prospect.created_at ? new Date(prospect.created_at).toLocaleDateString() : '-'}</span></div>
             ${cpsHtml}
         `;
+        // The CPS Form photo is a placeholder until it is swapped for a signed
+        // link. The automatic swap only watches the main page, and the phone
+        // "Details" pop-up (pvShowDetails) renders this tab in a modal outside
+        // it — so the photo stayed an invisible 1-pixel image with nothing to
+        // tap (2026-11-07). Swap it here, wherever the tab is drawn.
+        if (isImage) {
+            try { window._resolveAttachmentImages && window._resolveAttachmentImages(container); } catch (_) { /* best-effort thumbnail; the link below still opens it */ }
+        }
     }
     else if (tab === 'forms') {
         // Customer Forms accordion — Survey / CPS / APU per prospect.
