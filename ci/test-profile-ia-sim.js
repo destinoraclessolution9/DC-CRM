@@ -249,6 +249,24 @@ const flush = () => new Promise(r => setImmediate(r));
     check('details: Edit opens the prospect edit form', !!(modal && modal.actions.some(a => a.label === 'Edit' && a.action.includes('app.editProspect(55)'))));
     check('details: filled by the Basic Information renderer', /Ming Gua/.test(dom.document.getElementById('pv-details-body-55').innerHTML));
   }
+  {
+    // CPS Form photo in the pop-up (2026-11-07): the modal sits outside
+    // #content-viewport, so the renderer must swap the placeholder itself,
+    // and "Tap to view full size" must be a real link.
+    PROSPECT.cps_form_url = 'cps_forms/55_IMG_1.jpg';
+    PROSPECT.cps_form_name = 'IMG_1.jpg';
+    const { dom, app, sandbox } = makeSandbox();
+    sandbox.UI.showModal = () => { dom.el('pv-details-body-55'); };
+    const resolved = [];
+    sandbox.window._resolveAttachmentImages = (root) => { resolved.push(root); };
+    await app.pvShowDetails('prospect', PID);
+    const body = dom.document.getElementById('pv-details-body-55');
+    check('details CPS: photo placeholder rendered', /data-attach-src="cps_forms\/55_IMG_1\.jpg"/.test(body.innerHTML));
+    check('details CPS: photo resolved inside the pop-up body', resolved.length === 1 && resolved[0] === body);
+    check('details CPS: "Tap to view full size" opens the file', /<a [^>]*class="pv-cps-open"[^>]*_openAttachment\('cps_forms\/55_IMG_1\.jpg'\)[^>]*>[^<]*<i[^>]*><\/i> Tap to view full size<\/a>/.test(body.innerHTML));
+    delete PROSPECT.cps_form_url;
+    delete PROSPECT.cps_form_name;
+  }
 
   // ═══ Next up ═══════════════════════════════════════════════════════════════
   {
