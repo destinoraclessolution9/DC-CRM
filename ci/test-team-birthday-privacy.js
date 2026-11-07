@@ -211,7 +211,8 @@ ok('phone Home: both renderers filter the RPC rows',
     count(mob, '_dedupStaffByBday(_utils.filterTeamBirthdays(_state.cu, cachedTeamBdays.filter(_isStaffUser), cachedTeamBdays))') === 2);
 ok('phone Home users fetch has no DOB / IC / phone',
     mob.includes("select: 'id,full_name,role,reporting_to,team_id,status'") && mob.includes("'mhome-users-v3-' + _mhomeUid"));
-ok('phone Calendar reads the RPC', mob.includes('_utils.fetchTeamBirthdays()\n'));
+// \r?\n: a Windows checkout (core.autocrlf) has CRLF line ends, CI has LF.
+ok('phone Calendar reads the RPC', /_utils\.fetchTeamBirthdays\(\)\r?\n/.test(mob));
 ok('phone Calendar filters per render',
     mob.includes('_utils.filterTeamBirthdays(_state.cu, raw.filter(_isStaffUser), raw)'));
 ok('phone Calendar cache is per viewer (server-filtered rows)',
