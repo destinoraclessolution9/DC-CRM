@@ -2792,15 +2792,15 @@
             const d = cellDate.getDate();
             const isOther = cellDate.getMonth() !== _mcalMonth || cellDate.getFullYear() !== _mcalYear;
             const isToday = (cellDate.getFullYear() === todayY && cellDate.getMonth() === todayM && d === todayDay);
-            const dayActs = (byDate.get(k) || []).filter(a => a.source !== 'birthday_auto' && a.activity_type !== 'EVENT_CLOSING');
+            // Birthdays are NOT drawn on the month grid (owner 2026-11-09: a
+            // month of 🎂 chips made a free calendar look busy). They stay in
+            // byDate → _mcalByDate, so tapping a day still shows the birthday
+            // cards + WhatsApp at the top of the day sheet, and "+N more"
+            // counts real appointments only.
+            const dayActs = (byDate.get(k) || []).filter(a => !a._isBirthday && a.source !== 'birthday_auto' && a.activity_type !== 'EVENT_CLOSING');
             const visibleActs = dayActs.slice(0, 3);
             const overflow = Math.max(0, dayActs.length - 3);
             const evtsHtml = visibleActs.map(a => {
-                if (a._isBirthday) {
-                    const p = a._person;
-                    const fname = String(p.full_name || '').split(' ')[0];
-                    return `<div class="mcal-evt allday" title="🎂 ${_mhomeEsc(p.full_name||fname)}'s Birthday" onclick="event.stopPropagation();app.mcalDayClick('${k}')">🎂 ${_mhomeEsc(fname)}</div>`;
-                }
                 const time = (a.start_time || '00:00').slice(0, 5);
                 const color = _mcalColorForType(a.activity_type);
                 const short = _mcalShortTitle(a, personMap);
