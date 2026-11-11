@@ -3162,6 +3162,8 @@ const _renderDeliveryListing = async () => {
         l.diDone = its.length ? its.filter(r => r.status !== 'pending').length : (l.status === 'Delivered' ? 1 : 0);
         const pendDates = its.filter(r => r.status === 'pending' && r.expected_ready_date).map(r => r.expected_ready_date).sort();
         l.readyDate = its.length ? (pendDates[0] || its.map(r => r.expected_ready_date).filter(Boolean).sort().pop() || '') : (l.crReady || '');
+        // 🏭 → 🏢 ready at office → 📥 with agent → 📲 customer told → ✅
+        l.st = _diLineStage(its, l.status === 'Delivered');
     }
 
     // Derive payment type, maturity + production-readiness per line.
@@ -3183,6 +3185,7 @@ const _renderDeliveryListing = async () => {
     let rows = lines.filter(l => _deliveryShowDelivered || l.status !== 'Delivered');
     if (_deliveryPayFilter === 'full') rows = rows.filter(l => !l.inst);
     else if (_deliveryPayFilter === 'installment') rows = rows.filter(l => l.inst);
+    if (_deliveryStageFilter) rows = rows.filter(l => l.st && l.st.counts[_deliveryStageFilter] > 0);
     if (search) {
         rows = rows.filter(l =>
             l.name.toLowerCase().includes(search) ||
@@ -3201,7 +3204,14 @@ const _renderDeliveryListing = async () => {
     const cInst = _afterDelivered.filter(l => l.inst).length;
     const tab = (key, label, n) => `<button class="btn btn-sm ${_deliveryPayFilter === key ? 'primary' : 'secondary'}" onclick="app._setDeliveryPayFilter('${key}')">${label} (${n})</button>`;
     const _advN = await _advOwedCount();
-    const tabsHtml = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${tab('all', 'All', cAll)}${tab('full', 'Full Payment', cFull)}${tab('installment', 'Installment', cInst)}<button class="btn btn-sm secondary" style="margin-left:auto;" onclick="app.openAgentAdvances('owed')">🤝 Agent advances${_advN ? ` (${_advN} owed)` : ''}</button><button class="btn btn-sm secondary" onclick="app.openCancellations('requested')">❌ Cancellations</button></div>`;
+    // Step chips: lines with any item at that step (tap again to clear).
+    const stageTab = (key) => {
+        const n = _afterDelivered.filter(l => l.st && l.st.counts[key] > 0).length;
+        const s = _DI_STAGE[key];
+        return `<button class="btn btn-sm ${_deliveryStageFilter === key ? 'primary' : 'secondary'}" onclick="app._setDeliveryStageFilter('${key}')">${s.icon} ${s.label} (${n})</button>`;
+    };
+    const stageRow = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${stageTab('office')}${stageTab('collected')}${stageTab('told')}<button class="btn btn-sm secondary" style="margin-left:auto;" onclick="app.openOfficeNotices()">📷 Office photos</button></div>`;
+    const tabsHtml = stageRow + `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${tab('all', 'All', cAll)}${tab('full', 'Full Payment', cFull)}${tab('installment', 'Installment', cInst)}<button class="btn btn-sm secondary" style="margin-left:auto;" onclick="app.openAgentAdvances('owed')">🤝 Agent advances${_advN ? ` (${_advN} owed)` : ''}</button><button class="btn btn-sm secondary" onclick="app.openCancellations('requested')">❌ Cancellations</button></div>`;
 
     if (!rows.length) {
         body.innerHTML = tabsHtml + `<div style="text-align:center;color:var(--gray-400);padding:32px;">${_deliveryShowDelivered ? 'No product lines found.' : 'No pending deliveries. 🎉'}</div>`;
@@ -3217,6 +3227,7 @@ const _renderDeliveryListing = async () => {
         <th scope="col">Payment</th>
         <th scope="col">Maturity</th>
         <th scope="col">Expected Ready</th>
+        <th scope="col">Step</th>
         <th scope="col">Production</th>
         <th scope="col">Delivery Status</th>
         <th scope="col">Remarks</th>
@@ -3255,6 +3266,7 @@ const _renderDeliveryListing = async () => {
             <td>${payBadge}</td>
             <td style="white-space:nowrap;">${l.inst ? escapeHtml(l.maturity || '—') : '<span style="color:var(--gray-400);">—</span>'}</td>
             <td>${_diReadyCell(l.readyDate, l.diDone >= l.diTotal)}</td>
+            <td>${_diStageCell(l.st || { stage: 'production' })}</td>
             <td>${prodBadge}</td>
             <td>${statusSel}<button class="btn-sm secondary" style="margin-top:4px;white-space:nowrap;" title="Items, handover date and photo proof" onclick="event.stopPropagation(); app.openDeliveryItems('${l.kind}', ${l.id}, ${l.customerId})"><i class="fas fa-box"></i> Items ${l.diDone}/${l.diTotal}</button></td>
             <td><input type="text" class="form-control" style="font-size:12px;padding:4px 6px;min-width:140px;" value="${escapeHtml(l.remarks)}" placeholder="Add remark…" onchange="app.saveDeliveryRemarks('${l.kind}', ${l.id}, ${l.customerId}, this.value)"></td>
@@ -3373,11 +3385,11 @@ const _diOrderInfo = async (kind, id, customerId) => {
                 ready = _diReadyFromCr(crs.find(c => String(c.invoice_number || '').trim().toLowerCase() === inv));
             }
         } catch (_) { /* no ready date */ }
-        return { item: p?.item || 'Item', ringSize: p?.ring_size || '', ready, invoice: p?.invoice || '', name, status: p?.delivery_status || 'Pending Delivery', agentId: p?.agent_id || customer?.responsible_agent_id || null };
+        return { item: p?.item || 'Item', ringSize: p?.ring_size || '', ready, invoice: p?.invoice || '', name, phone: customer?.phone || '', status: p?.delivery_status || 'Pending Delivery', agentId: p?.agent_id || customer?.responsible_agent_id || null };
     }
     const pr = await AppDataStore.getById('prospects', id);
     const cr = pr?.closing_record || {};
-    return { item: cr.product || 'Item', ringSize: cr.ring_size || '', ready: _diReadyFromCr(cr), invoice: cr.invoice_number || '', name, status: cr.delivery_status || 'Pending Delivery', agentId: customer?.responsible_agent_id || pr?.responsible_agent_id || null };
+    return { item: cr.product || 'Item', ringSize: cr.ring_size || '', ready: _diReadyFromCr(cr), invoice: cr.invoice_number || '', name, phone: customer?.phone || '', status: cr.delivery_status || 'Pending Delivery', agentId: customer?.responsible_agent_id || pr?.responsible_agent_id || null };
 };
 
 const _diFetchItems = async (kind, id) => {
@@ -3408,8 +3420,9 @@ const openDeliveryItems = async (kind, id, customerId, opts = {}) => {
             items = await _diFetchItems(kind, id);
         }
         _diCtx = { kind, id, customerId, title: `${info.name}${info.invoice ? ' · ' + info.invoice : ''}`, saleAgentId: info.agentId || null,
-            from: opts && opts.from === 'profile' ? 'profile' : 'list' };
+            from: opts && opts.from === 'profile' ? 'profile' : 'list', custName: info.name || '', phone: info.phone || '' };
         await _diLoadAdv(items);
+        await _diLoadNotices(items);
         UI.showModal('Delivery items', _diRenderItems(items), [
             _diCtx.from === 'profile'
                 ? { label: 'Close', type: 'secondary', action: 'app.diClose()' }
@@ -3437,7 +3450,7 @@ const _diRenderItems = (items) => {
             : `<span class="score-badge" style="font-size:11px;background:#dcfce7;color:#166534;"><i class="fas fa-check-circle"></i> ${_DI_STATUS_LABEL[r.status] || escapeHtml(r.status)}</span>`;
         const dis = isPending ? '' : 'disabled';
         const action = isPending
-            ? (items.length > 1 ? `<button class="btn-sm secondary" title="Remove this item" onclick="event.stopPropagation(); app.diDeleteItem(${r.id})"><i class="fas fa-trash"></i></button>` : '')
+            ? `<div style="display:flex;gap:4px;flex-wrap:wrap;">${_diStageActions(r)}${items.length > 1 ? `<button class="btn-sm secondary" title="Remove this item" onclick="event.stopPropagation(); app.diDeleteItem(${r.id})"><i class="fas fa-trash"></i></button>` : ''}</div>`
             : `<button class="btn-sm secondary" title="Undo handover" onclick="event.stopPropagation(); app.diUndoHandover(${r.id})"><i class="fas fa-undo"></i> Undo</button>${_diAdvAction(r)}`;
         return `<tr>
             <td data-label="Pick">${isPending ? `<input type="checkbox" class="di-pick" value="${r.id}" aria-label="Select item for handover">` : ''}</td>
@@ -3445,7 +3458,7 @@ const _diRenderItems = (items) => {
             <td data-label="Qty"><input type="number" min="1" class="form-control" style="font-size:12px;width:64px;" value="${r.qty || 1}" ${dis} onchange="app.diSaveField(${r.id}, 'qty', this.value)"></td>
             <td data-label="Ring size"><input type="text" class="form-control" style="font-size:12px;width:80px;" value="${escapeHtml(r.ring_size || '')}" ${dis} onchange="app.diSaveField(${r.id}, 'ring_size', this.value)"></td>
             <td data-label="Expected ready"><input type="date" class="form-control" style="font-size:12px;" value="${escapeHtml(r.expected_ready_date || '')}" ${dis} onchange="app.diSaveField(${r.id}, 'expected_ready_date', this.value)"></td>
-            <td data-label="Status">${statusBadge}${_diAdvLine(r)}</td>
+            <td data-label="Status">${statusBadge}${_diStageLines(r)}${_diAdvLine(r)}</td>
             <td data-label="Handover date" style="white-space:nowrap;">${escapeHtml(r.handover_date || '—')}</td>
             <td data-label="Photos">${photoLinks || '<span style="color:var(--gray-400);">—</span>'}</td>
             <td data-label="Remarks"><input type="text" class="form-control" style="font-size:12px;min-width:120px;" value="${escapeHtml(r.remarks || '')}" placeholder="Remark…" onchange="app.diSaveField(${r.id}, 'remarks', this.value)"></td>
@@ -3487,6 +3500,7 @@ const _diRefresh = async () => {
     if (!_diCtx) return [];
     const items = await _diFetchItems(_diCtx.kind, _diCtx.id);
     await _diLoadAdv(items);
+    await _diLoadNotices(items);
     const panel = document.getElementById('di-panel');
     if (panel) panel.outerHTML = _diRenderItems(items);
     (window.app.applyMobileTableLabels || (() => {}))();
@@ -3864,7 +3878,629 @@ const advSaveReturn = async (advId) => {
 };
 
 
+// ── 🏢 Office "ready for collection" notices (owner 2026-11-11) ─────────────
+// The office (Agnes) sends a photo of a table — "財庫 pls collect on 11 NOV
+// 2026, WED - lvl 20" with SN NO | group | DEALER | CUSTOMER | ITEM. Upload it
+// here: the photo is saved first (public.office_notices), the office-notice-ocr
+// edge function reads every line into office_notice_lines, the lines are
+// matched to our orders by SN (= the invoice number), and Confirm marks the
+// ticked items "🏢 Ready at office" (date + place + the photo as the record) and
+// pushes the sale agents. Then per item: 📥 Collected from office → 📲 Tell
+// customer (WhatsApp) → the existing handover with photo proof.
+// delivery_items.status (pending → delivered | picked_up) is not touched.
+
+// Traditional → simplified for product names ("上龍柄" on the sheet = "上龙柄").
+const _OFN_T2S = new Map(['財财', '庫库', '龍龙', '貞贞', '寶宝', '萬万', '積积', '倉仓', '圖图', '鴻鸿', '勝胜', '決决',
+    '書书', '順顺', '麗丽', '風风', '載载', '機机', '見见', '潤润', '祿禄', '晉晋', '雲云', '運运', '圓圆', '滿满',
+    '極极', '達达', '護护', '環环', '權权', '業业', '傳传', '寧宁', '樂乐', '長长', '門门', '開开', '發发', '會会',
+    '華华', '興兴', '壽寿', '歲岁', '號号', '體体', '東东', '陽阳', '陰阴', '將将', '時时', '間间', '臨临', '鳳凤',
+    '億亿', '雙双', '貴贵', '榮荣', '譽誉', '聖圣', '贏赢', '錢钱', '銀银', '鑽钻', '飾饰', '鏈链', '經经', '緣缘',
+    '紅红', '綠绿', '藍蓝', '黃黄', '進进', '遠远', '還还', '過过', '來来', '為为', '對对', '從从', '與与', '無无',
+    '兩两', '實实', '學学', '專专', '葉叶', '協协', '廣广', '慶庆', '歡欢', '覺觉', '觀观', '舉举', '夢梦', '靈灵',
+    '氣气', '豐丰', '戰战', '擇择', '據据', '際际', '隨随', '點点', '讀读', '誠诚', '說说', '證证', '識识', '議议',
+    '讓让', '變变', '處处', '師师', '歸归', '擁拥', '層层', '屬属', '區区', '單单', '嚴严', '團团', '園园', '國国',
+    '圍围', '齊齐', '龜龟', '錦锦', '繡绣', '網网', '聯联', '總总', '鐘钟', '鐵铁', '鏡镜', '閣阁', '關关', '雞鸡',
+    '魚鱼', '鶴鹤', '獅狮', '馬马', '騰腾'].map(p => [p[0], p[1]]));
+const _ofnSimp = (s) => String(s || '').replace(/[㐀-鿿]/g, ch => _OFN_T2S.get(ch) || ch);
+// Same rule as public.office_sn_norm: letters + digits only, a leading PR / PRN
+// in front of a digit dropped ("PR 1936760" → 1936760, "SG 0000013" → SG0000013).
+const _ofnSnNorm = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^PRN?(?=\d)/, '');
+const _ofnWords = (s) => new Set(String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 2));
+const _ofnHan = (s) => new Set(Array.from(_ofnSimp(s)).filter(ch => /[㐀-鿿]/.test(ch)));
+const _ofnOverlap = (a, b) => { let n = 0; a.forEach(x => { if (b.has(x)) n++; }); return n; };
+// Office customer vs CRM customer. The SN already ties the line to the order;
+// this only decides green (ticked) vs amber ("check it, then tick").
+const _ofnNameMatch = (a, b) => {
+    const x = String(a || '').trim().toLowerCase(), y = String(b || '').trim().toLowerCase();
+    if (!x || !y) return false;
+    if (x.includes(y) || y.includes(x)) return true;
+    const wx = _ofnWords(x), wy = _ofnWords(y);
+    const small = Math.min(wx.size, wy.size);
+    if (small && _ofnOverlap(wx, wy) >= Math.min(small, Math.max(2, Math.ceil(small * 0.67)))) return true;
+    const hx = _ofnHan(x), hy = _ofnHan(y);
+    const hs = Math.min(hx.size, hy.size);
+    return hs >= 2 && _ofnOverlap(hx, hy) >= Math.max(2, Math.ceil(hs * 0.67));
+};
+const _ofnItemScore = (a, b) => _ofnOverlap(_ofnHan(a), _ofnHan(b)) * 2 + _ofnOverlap(_ofnWords(a), _ofnWords(b));
+
+// One review row per office line: which order / item it lands on, its colour
+// and whether it is ticked by default.
+//   green  ours, waiting, names agree → ticked
+//   amber  ours but the name differs, the order is cancelled, or the office
+//          lists more pieces than the CRM has → shown unticked, tick to apply
+//   blue   ours, nothing to do (already handed over / already ready) — or the
+//          customer already has an agent's own piece (ticked: the office piece
+//          goes back to the lender)
+//   grey   no sale with this SN in the CRM (other dealers in the group)
+//   done   confirmed earlier
+const _ofnClassify = (lines) => {
+    const used = new Set((lines || []).filter(l => l.delivery_item_id).map(l => String(l.delivery_item_id)));
+    return (lines || []).map(l => {
+        const row = { line: l, order: null, target: null, newName: '', tone: 'grey', note: '', pick: false, selectable: false, options: [] };
+        const orders = Array.isArray(l.orders) ? l.orders : [];
+        if (l.applied_at) {
+            row.tone = 'done';
+            row.order = orders.find(o => (o.items || []).some(i => String(i.id) === String(l.delivery_item_id))) || orders[0] || null;
+            row.target = row.order ? ((row.order.items || []).find(i => String(i.id) === String(l.delivery_item_id)) || null) : null;
+            row.note = 'Marked ready at office ✓';
+            return row;
+        }
+        if (l.decision === 'not_ours') { row.note = 'Marked not ours'; return row; }
+        if (!orders.length) { row.note = l.sn_norm ? 'No sale with this SN in the CRM' : 'No SN on this line'; return row; }
+        const order = orders.slice().sort((a, b) => (_ofnNameMatch(l.customer, b.customer_name) ? 1 : 0) - (_ofnNameMatch(l.customer, a.customer_name) ? 1 : 0))[0];
+        row.order = order;
+        const nameOk = _ofnNameMatch(l.customer, order.customer_name);
+        const items = Array.isArray(order.items) ? order.items : [];
+        const pend = items.filter(i => i.status === 'pending');
+        const free = items.filter(i => !used.has(String(i.id)));
+        const waiting = free.filter(i => i.status === 'pending' && !i.office_ready_date);
+        const lent = free.filter(i => i.status !== 'pending' && i.adv_status === 'owed' && !i.office_ready_date);
+        // First piece of a never-opened order takes the order's own product text
+        // (like opening its Items screen would); extra pieces take the office's.
+        row.newName = items.length ? (l.item || order.item || 'Item') : (order.item || l.item || 'Item');
+        row.options = [...waiting, ...lent].map(i => ({ id: i.id, label: i.item_name + (i.status !== 'pending' ? ' (🤝 lent piece)' : '') }))
+            .concat([{ id: '', label: '➕ New item: ' + row.newName }]);
+        const okNote = 'Will be marked ready at office';
+        const checkNote = `Name differs ("${l.customer || '—'}" vs "${order.customer_name || '—'}") — check it is the same customer, then tick`;
+        if (waiting.length) {
+            const best = waiting.slice().sort((a, b) => _ofnItemScore(l.item, b.item_name) - _ofnItemScore(l.item, a.item_name))[0];
+            row.target = best; used.add(String(best.id));
+            row.selectable = true; row.tone = nameOk ? 'green' : 'amber'; row.pick = nameOk; row.note = nameOk ? okNote : checkNote;
+        } else if (!items.length && String(order.delivery_status || '') === 'Delivered') {
+            // marked Delivered on the order itself (before per-item tracking)
+            row.tone = 'blue'; row.note = 'Already delivered (the order is marked Delivered)';
+        } else if (!items.length) {
+            row.selectable = true; row.tone = nameOk ? 'green' : 'amber'; row.pick = nameOk; row.note = nameOk ? okNote : checkNote;
+        } else if (lent.length) {
+            const best = lent.slice().sort((a, b) => _ofnItemScore(l.item, b.item_name) - _ofnItemScore(l.item, a.item_name))[0];
+            row.target = best; used.add(String(best.id));
+            row.selectable = true; row.tone = 'blue'; row.pick = true;
+            row.note = `🤝 The customer already has ${best.adv_lender_name || 'an agent'}'s own piece — this office piece goes back to them`;
+        } else if (pend.length && free.some(i => i.status === 'pending')) {
+            const r0 = pend.find(i => i.office_ready_date) || pend[0];
+            row.tone = 'blue'; row.note = `Already marked ready at office (${r0.office_ready_date || '—'})`;
+        } else if (pend.length) {
+            row.selectable = true; row.tone = 'amber';
+            row.note = 'The office lists more pieces than the CRM has for this order — tick to add it as a new item';
+        } else {
+            const h = items.find(i => i.handover_date);
+            row.tone = 'blue'; row.note = 'Already handed over' + (h ? ` (${h.handover_date})` : '');
+        }
+        if (row.selectable && /cancel/i.test(order.delivery_status || '')) { row.tone = 'amber'; row.pick = false; row.note = 'This order is cancelled in the CRM — check before ticking'; }
+        return row;
+    });
+};
+
+const _OFN_TONE = {
+    green: { bg: '#dcfce7', fg: '#166534', dot: '🟢' }, amber: { bg: '#fef3c7', fg: '#92400e', dot: '🟡' },
+    blue: { bg: '#dbeafe', fg: '#1e40af', dot: '🔵' }, grey: { bg: 'var(--gray-100,#f3f4f6)', fg: 'var(--gray-500,#6b7280)', dot: '⚪' },
+    done: { bg: '#dcfce7', fg: '#166534', dot: '✅' },
+};
+const _ofnFmt = (d) => d ? new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+const _ofnRace = (p, ms) => Promise.race([Promise.resolve(p), new Promise((_, rej) => setTimeout(() => rej(new Error('timed out — check your connection')), ms))]);
+
+// Phone photos are 3–4 MB; a sheet stays legible at 2000px on the long side.
+const _ofnShrink = async (file, maxPx = 2000, quality = 0.88) => {
+    let src = null, w = 0, h = 0, url = null;
+    try { if (typeof createImageBitmap === 'function') { src = await createImageBitmap(file); w = src.width; h = src.height; } } catch (_) { src = null; }
+    if (!src) {
+        url = URL.createObjectURL(file);
+        src = await new Promise((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = () => reject(new Error('Could not open this photo')); img.src = url; });
+        w = src.naturalWidth || src.width; h = src.naturalHeight || src.height;
+    }
+    try {
+        const s = Math.min(1, maxPx / Math.max(w, h || 1));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(w * s)); canvas.height = Math.max(1, Math.round(h * s));
+        canvas.getContext('2d').drawImage(src, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+        if (!blob) throw new Error('Could not compress this photo');
+        if (/^image\/jpe?g$/i.test(file.type || '') && s === 1 && file.size <= blob.size) return file;
+        return new File([blob], 'office_notice.jpg', { type: 'image/jpeg' });
+    } finally {
+        if (url) URL.revokeObjectURL(url);
+        try { if (src && src.close) src.close(); } catch (_) {}
+    }
+};
+const _ofnHash = async (file) => {
+    try {
+        const buf = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (_) { return null; }
+};
+
+// Ask the edge function to read the saved photo → { ok, detail }.
+const _ofnRead = async (noticeId) => {
+    const sb = _diSb();
+    try {
+        if (!sb || !sb.functions) throw new Error('reader not available');
+        const { data, error } = await _ofnRace(sb.functions.invoke('office-notice-ocr', { body: { notice_id: Number(noticeId) } }), 75000);
+        if (error) {
+            let detail = error.message || 'reader unavailable';
+            try { const j = await error.context.json(); detail = j.detail || j.error || detail; } catch (_) { /* keep message */ }
+            return { ok: false, detail };
+        }
+        if (!data || data.ok === false) return { ok: false, detail: (data && (data.detail || data.error)) || 'read failed' };
+        return { ok: true, lines: data.lines || 0 };
+    } catch (e) {
+        return { ok: false, detail: e?.message || String(e) };
+    }
+};
+
+// ── Notices list + upload ──
+let _ofnBusy = false;
+const openOfficeNotices = async () => {
+    const sb = _diSb();
+    if (!sb) return UI.toast.error('Offline — try again in a moment');
+    let notices = [], counts = new Map();
+    try {
+        const { data, error } = await sb.from('office_notices')
+            .select('id,created_at,title,category,collect_date,collect_time,place,status,read_error,photo_path,is_ready_list')
+            .neq('status', 'discarded').order('created_at', { ascending: false }).limit(40);
+        if (error) throw error;
+        notices = data || [];
+        if (notices.length) {
+            const { data: ls } = await sb.from('office_notice_lines').select('notice_id,applied_at').in('notice_id', notices.map(n => n.id));
+            for (const l of ls || []) {
+                const c = counts.get(String(l.notice_id)) || { all: 0, done: 0 };
+                c.all++; if (l.applied_at) c.done++;
+                counts.set(String(l.notice_id), c);
+            }
+        }
+    } catch (e) {
+        return UI.toast.error('Could not load office notices: ' + (e?.message || e));
+    }
+    const chip = (n) => {
+        if (n.status === 'applied') return '<span class="score-badge" style="font-size:11px;background:#dcfce7;color:#166534;">✅ Confirmed</span>';
+        if (n.status === 'read') return n.is_ready_list === false
+            ? '<span class="score-badge" style="font-size:11px;background:#fef3c7;color:#92400e;">Not a ready list?</span>'
+            : '<span class="score-badge" style="font-size:11px;background:#dbeafe;color:#1e40af;">Read · to confirm</span>';
+        return `<span class="score-badge" style="font-size:11px;background:#fef3c7;color:#92400e;">${n.read_error ? 'Not read — tap Open' : 'Saved · not read'}</span>`;
+    };
+    const rows = notices.map(n => {
+        const c = counts.get(String(n.id)) || { all: 0, done: 0 };
+        return `<tr>
+            <td style="white-space:nowrap;">${escapeHtml(_ofnFmt(n.created_at))}</td>
+            <td>${escapeHtml(n.title || n.category || '—')}</td>
+            <td style="white-space:nowrap;">${escapeHtml(n.collect_date ? _ofnFmt(n.collect_date) : '—')}${n.collect_time ? ' · ' + escapeHtml(n.collect_time) : ''}${n.place ? `<div style="font-size:11px;color:var(--gray-500);">${escapeHtml(n.place)}</div>` : ''}</td>
+            <td>${c.all ? `${c.done}/${c.all}` : '—'}</td>
+            <td>${chip(n)}</td>
+            <td style="white-space:nowrap;">
+                <button class="btn-sm primary" onclick="event.stopPropagation(); app.openOfficeNotice(${Number(n.id)})">Open</button>
+                <button class="btn-sm secondary" title="View the photo" onclick="event.stopPropagation(); window._openAttachment && window._openAttachment('${UI.escJsAttr(String(n.photo_path || ''))}')">📷</button>
+            </td>
+        </tr>`;
+    }).join('');
+    UI.showModal('🏢 Office ready notices', `
+        <div style="border:1px dashed var(--border,#d6d3d1);border-radius:10px;padding:14px;margin-bottom:14px;">
+            <div style="font-weight:600;margin-bottom:4px;">📷 Upload the office's photo</div>
+            <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;">The "ready for collection" sheet the office sends (photo or screenshot). The CRM keeps the photo, reads every line and finds our orders by SN.</div>
+            <input type="file" id="ofn-file" class="form-control" accept="image/*" multiple onchange="app.ofnUpload(this)">
+            <div id="ofn-status" style="font-size:12px;color:var(--primary);margin-top:6px;"></div>
+        </div>
+        ${notices.length ? `<div class="prospects-table-container"><table class="prospects-table"><thead><tr>
+            <th scope="col">Uploaded</th><th scope="col">Sheet</th><th scope="col">Collect</th><th scope="col">Lines done</th><th scope="col">Status</th><th scope="col"></th>
+        </tr></thead><tbody>${rows}</tbody></table></div>` : '<div style="text-align:center;color:var(--gray-400);padding:20px;">No office photos uploaded yet.</div>'}`,
+        [{ label: '← Delivery list', type: 'secondary', action: 'app.openDeliveryListing()' }], 'fullscreen');
+    (window.app.applyMobileTableLabels || (() => {}))();
+};
+
+const ofnUpload = async (input) => {
+    const files = Array.from((input && input.files) || []).filter(f => f && (!f.type || f.type.startsWith('image/')));
+    if (!files.length || _ofnBusy) return;
+    const sb = _diSb();
+    if (!sb) return UI.toast.error('Offline — the photo was not saved');
+    const status = document.getElementById('ofn-status');
+    const say = (t) => { if (status) status.textContent = t; };
+    _ofnBusy = true;
+    let lastId = null;
+    try {
+        for (let i = 0; i < files.length; i++) {
+            const tag = files.length > 1 ? ` ${i + 1}/${files.length}` : '';
+            const hash = await _ofnHash(files[i]);
+            if (hash) {
+                const { data: dup } = await sb.from('office_notices').select('id,created_at').eq('photo_hash', hash).neq('status', 'discarded').limit(1);
+                if (dup && dup.length) {
+                    UI.toast.info ? UI.toast.info(`Photo${tag} was already uploaded on ${_ofnFmt(dup[0].created_at)}`) : UI.toast.success(`Photo${tag} was already uploaded`);
+                    lastId = dup[0].id;
+                    continue;
+                }
+            }
+            say(`Saving photo${tag}…`);
+            let file = files[i];
+            try { file = await _ofnShrink(file); } catch (_) { /* send as is */ }
+            const d = _custLocalDay();
+            const path = `office-notices/${d.slice(0, 7)}/${Date.now()}_${i}.jpg`;
+            const { error: upErr } = await sb.storage.from('attachments').upload(path, file, { upsert: false, contentType: file.type || 'image/jpeg' });
+            if (upErr) throw upErr;
+            const { data: ins, error: insErr } = await sb.from('office_notices').insert({ photo_path: path, photo_hash: hash, created_by: _state.cu?.id || null }).select('id');
+            if (insErr) { try { await sb.storage.from('attachments').remove([path]); } catch (_) { /* best-effort */ } throw insErr; }
+            lastId = ins && ins[0] && ins[0].id;
+            say(`Photo${tag} saved ✓ — reading the lines (up to a minute)…`);
+            const r = await _ofnRead(lastId);
+            if (!r.ok) UI.toast.error(`Photo${tag} saved, but the AI couldn't read it (${r.detail}). Open it to read again or type the SNs.`);
+        }
+    } catch (e) {
+        UI.toast.error('Upload failed: ' + (e?.message || e));
+    } finally {
+        _ofnBusy = false;
+        say('');
+        if (input) try { input.value = ''; } catch (_) {}
+    }
+    if (lastId) await openOfficeNotice(lastId);
+    else await openOfficeNotices();
+};
+
+// ── One notice: review + confirm ──
+let _ofnCtx = null; // { id, notice, rows }
+const openOfficeNotice = async (id) => {
+    const sb = _diSb();
+    if (!sb) return UI.toast.error('Offline — try again in a moment');
+    let notice = null, lines = [];
+    try {
+        const [{ data: ns, error: e1 }, { data: ls, error: e2 }] = await Promise.all([
+            sb.from('office_notices').select('*').eq('id', id).limit(1),
+            sb.rpc('office_notice_candidates', { p_notice_id: Number(id) }),
+        ]);
+        if (e1) throw e1;
+        if (e2) throw e2;
+        notice = ns && ns[0];
+        lines = Array.isArray(ls) ? ls : [];
+    } catch (e) {
+        return UI.toast.error('Could not open the notice: ' + (e?.message || e));
+    }
+    if (!notice) return UI.toast.error('Notice not found');
+    _ofnCtx = { id: Number(id), notice, rows: _ofnClassify(lines) };
+    const canConfirm = _ofnCtx.rows.some(r => r.selectable);
+    UI.showModal('🏢 Office notice', _ofnRenderNotice(), [
+        { label: '← Notices', type: 'secondary', action: 'app.openOfficeNotices()' },
+        ...(canConfirm ? [{ label: 'Confirm ticked', type: 'primary', action: '(async () => { await app.ofnConfirm(); })()' }] : []),
+    ], 'fullscreen');
+    (window.app.applyMobileTableLabels || (() => {}))();
+};
+
+const _ofnRowHtml = (r, i) => {
+    const t = _OFN_TONE[r.tone] || _OFN_TONE.grey;
+    const l = r.line;
+    const o = r.order;
+    const box = r.selectable ? `<input type="checkbox" class="ofn-pick" value="${i}" ${r.pick ? 'checked' : ''} aria-label="Mark line ${l.line_no} ready at office">` : t.dot;
+    const sel = r.selectable && r.options.length > 1
+        ? `<select id="ofn-target-${i}" class="form-control" style="font-size:12px;margin-top:4px;">${r.options.map(op => `<option value="${escapeHtml(String(op.id))}" ${String(op.id) === String(r.target ? r.target.id : '') ? 'selected' : ''}>${escapeHtml(op.label)}</option>`).join('')}</select>`
+        : (r.selectable && !r.target ? `<div style="font-size:11px;color:var(--gray-500);">➕ New item: ${escapeHtml(r.newName)}</div>` : '');
+    const crm = o ? `<strong>${escapeHtml(o.customer_name || '—')}</strong>
+            <div style="font-size:11px;color:var(--gray-500);">${escapeHtml(o.item || '')}${o.invoice ? ' · ' + escapeHtml(o.invoice) : ''}${o.agent_name ? ' · ' + escapeHtml(o.agent_name) : ''}</div>
+            ${r.target && !r.selectable ? `<div style="font-size:11px;">→ ${escapeHtml(r.target.item_name || '')}</div>` : ''}${sel}` : '<span style="color:var(--gray-400);">—</span>';
+    const actions = r.tone === 'done' ? '' : (!o
+        ? `<button class="btn-sm secondary" onclick="event.stopPropagation(); app.ofnEditSn(${Number(l.id)})">✏️ SN</button>
+           ${l.decision === 'not_ours' ? `<button class="btn-sm secondary" onclick="event.stopPropagation(); app.ofnNotOurs(${Number(l.id)}, false)">Undo</button>` : `<button class="btn-sm secondary" onclick="event.stopPropagation(); app.ofnNotOurs(${Number(l.id)}, true)">Not ours</button>`}`
+        : `<button class="btn-sm secondary" title="Fix a misread SN" onclick="event.stopPropagation(); app.ofnEditSn(${Number(l.id)})">✏️ SN</button>`);
+    return `<tr>
+        <td data-label="✓">${box}</td>
+        <td data-label="#">${Number(l.line_no) || ''}</td>
+        <td data-label="SN" style="white-space:nowrap;">${escapeHtml(l.sn_raw || '—')}</td>
+        <td data-label="Office says"><strong>${escapeHtml(l.customer || '—')}</strong>
+            <div style="font-size:11px;color:var(--gray-500);">${escapeHtml(l.item || '')}${l.dealer ? ' · ' + escapeHtml(l.dealer) : ''}${l.remarks ? ' · ' + escapeHtml(l.remarks) : ''}</div></td>
+        <td data-label="In the CRM">${crm}</td>
+        <td data-label="Status"><span class="score-badge" style="font-size:11px;background:${t.bg};color:${t.fg};white-space:normal;">${t.dot} ${escapeHtml(r.note)}</span></td>
+        <td data-label="">${actions}</td>
+    </tr>`;
+};
+
+const _ofnRenderNotice = () => {
+    const { notice: n, rows } = _ofnCtx;
+    const ours = rows.map((r, i) => [r, i]).filter(([r]) => r.order || r.tone === 'done');
+    const others = rows.map((r, i) => [r, i]).filter(([r]) => !(r.order || r.tone === 'done'));
+    const cnt = (tone) => rows.filter(r => r.tone === tone).length;
+    const head = `<thead><tr><th scope="col">✓</th><th scope="col">#</th><th scope="col">SN</th><th scope="col">Office says</th><th scope="col">In the CRM</th><th scope="col">Status</th><th scope="col"></th></tr></thead>`;
+    const table = (list) => `<div class="prospects-table-container"><table class="prospects-table">${head}<tbody>${list.map(([r, i]) => _ofnRowHtml(r, i)).join('')}</tbody></table></div>`;
+    const locked = n.status === 'applied';
+    const readMsg = n.status === 'saved'
+        ? `<div style="background:#fef3c7;color:#92400e;border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px;">${n.read_error ? `The AI couldn't read this photo (${escapeHtml(n.read_error)}).` : 'This photo has not been read yet.'}
+            <button class="btn-sm primary" style="margin-left:6px;" onclick="(async () => { await app.ofnReread(); })()">🔄 Read it</button> or type the SNs below.</div>`
+        : (n.is_ready_list === false ? '<div style="background:#fef3c7;color:#92400e;border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px;">The AI says this does not look like a ready-for-collection sheet — check the photo.</div>' : '');
+    return `<div id="ofn-panel">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:10px;">
+            <button class="btn btn-sm secondary" onclick="window._openAttachment && window._openAttachment('${UI.escJsAttr(String(n.photo_path || ''))}')">📷 View photo</button>
+            <div style="flex:1;min-width:220px;">
+                <div style="font-weight:600;">${escapeHtml(n.title || n.category || 'Office notice')}</div>
+                <div style="font-size:12px;color:var(--gray-500);">Uploaded ${escapeHtml(_ofnFmt(n.created_at))}${n.read_provider ? ' · read by AI' : ''}</div>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group half"><label>Collect from (date)</label><input type="date" class="form-control" value="${escapeHtml(n.collect_date || '')}" ${locked ? 'disabled' : ''} onchange="app.ofnSaveHeader('collect_date', this.value)"></div>
+            <div class="form-group half"><label>Where</label><input type="text" class="form-control" value="${escapeHtml(n.place || '')}" placeholder="e.g. LVL 20, KL HQ" ${locked ? 'disabled' : ''} onchange="app.ofnSaveHeader('place', this.value)"></div>
+        </div>
+        ${readMsg}
+        <div style="font-size:13px;margin:6px 0 10px;"><strong>${rows.length} line${rows.length === 1 ? '' : 's'}</strong>
+            · 🟢 ${cnt('green')} ready to mark · 🟡 ${cnt('amber')} to check · 🔵 ${cnt('blue')} · ✅ ${cnt('done')} done · ⚪ ${others.length} not in the CRM</div>
+        ${ours.length ? table(ours) : '<div style="color:var(--gray-500);font-size:13px;margin-bottom:10px;">None of the lines matched a sale in the CRM.</div>'}
+        ${others.length ? `<details style="margin-top:12px;"${ours.length ? '' : ' open'}><summary style="cursor:pointer;font-size:13px;">⚪ Not in the CRM (${others.length}) — other dealers, or an SN to fix</summary>${table(others)}</details>` : ''}
+        <details style="margin-top:12px;"><summary style="cursor:pointer;font-size:13px;">✍️ Add lines by hand</summary>
+            <div style="font-size:12px;color:var(--gray-500);margin:6px 0;">One line each: SN, then customer and item, e.g. <code>1908016 Tan Soo Chi 財庫</code></div>
+            <textarea id="ofn-manual" class="form-control" rows="4"></textarea>
+            <button class="btn btn-sm secondary" style="margin-top:6px;" onclick="(async () => { await app.ofnAddManual(); })()">Add lines</button>
+        </details>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">
+            ${!locked && n.status !== 'saved' ? '<button class="btn btn-sm secondary" onclick="(async () => { await app.ofnReread(); })()">🔄 Read again</button>' : ''}
+            ${!locked ? '<button class="btn btn-sm secondary" onclick="(async () => { await app.ofnDiscard(); })()">🗑 Discard this photo</button>' : ''}
+        </div>
+    </div>`;
+};
+
+const ofnConfirm = async () => {
+    if (!_ofnCtx || _ofnBusy) return;
+    const idxs = Array.from(document.querySelectorAll('.ofn-pick:checked')).map(cb => Number(cb.value));
+    const picks = [];
+    for (const i of idxs) {
+        const r = _ofnCtx.rows[i];
+        if (!r || !r.order || !r.selectable) continue;
+        const sel = document.getElementById('ofn-target-' + i);
+        const itemId = sel ? String(sel.value || '') : (r.target ? String(r.target.id) : '');
+        picks.push({ line_id: r.line.id, kind: r.order.kind, order_id: r.order.id, item_id: itemId ? Number(itemId) : null, item_name: itemId ? null : r.newName });
+    }
+    if (!picks.length) return UI.toast.error('Tick the lines to mark ready at office');
+    _ofnBusy = true;
+    try {
+        const { data, error } = await _diSb().rpc('office_notice_apply', { p_notice_id: _ofnCtx.id, p_picks: picks });
+        if (error) throw error;
+        const d = data || {};
+        UI.toast.success(`${d.applied || 0} item${d.applied === 1 ? '' : 's'} marked ready at office${d.created ? ` (${d.created} new)` : ''}${d.pushed ? ` · ${d.pushed} agent${d.pushed === 1 ? '' : 's'} notified` : ''}`);
+    } catch (e) {
+        UI.toast.error('Not confirmed: ' + (e?.message || e));
+    } finally {
+        _ofnBusy = false;
+    }
+    await openOfficeNotice(_ofnCtx.id);
+};
+
+const ofnSaveHeader = async (field, value) => {
+    if (!_ofnCtx || !['collect_date', 'place'].includes(field)) return;
+    let v = String(value || '').trim();
+    if (field === 'collect_date' && v && !_diIsDay(v)) return UI.toast.error('Invalid date');
+    const { error } = await _diSb().from('office_notices').update({ [field]: v || null }).eq('id', _ofnCtx.id);
+    if (error) return UI.toast.error('Not saved: ' + error.message);
+    _ofnCtx.notice[field] = v || null;
+    UI.toast.success('Saved');
+};
+
+const ofnEditSn = async (lineId) => {
+    if (!_ofnCtx) return;
+    const r = _ofnCtx.rows.find(x => String(x.line.id) === String(lineId));
+    const v = prompt('SN (the invoice number on the sale)', r ? (r.line.sn_raw || '') : '');
+    if (v == null) return;
+    const { error } = await _diSb().from('office_notice_lines').update({ sn_raw: String(v).trim() || null, decision: null }).eq('id', lineId);
+    if (error) return UI.toast.error('Not saved: ' + error.message);
+    await openOfficeNotice(_ofnCtx.id);
+};
+
+const ofnNotOurs = async (lineId, on) => {
+    if (!_ofnCtx) return;
+    const { error } = await _diSb().from('office_notice_lines').update({ decision: on ? 'not_ours' : null }).eq('id', lineId);
+    if (error) return UI.toast.error('Not saved: ' + error.message);
+    await openOfficeNotice(_ofnCtx.id);
+};
+
+// "1908016 Tan Soo Chi 財庫" → SN + customer (latin part) + item (Chinese part).
+const _ofnParseManual = (text) => String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).map(s => {
+    const m = /^((?:PRN?|SG)?\s*\d{4,}|[A-Z]{1,3}\s*\d{4,})\s*(.*)$/i.exec(s);
+    if (!m) return null;
+    const rest = m[2] || '';
+    const k = rest.search(/[㐀-鿿]/);
+    return { sn_raw: m[1].trim(), customer: (k < 0 ? rest : rest.slice(0, k)).trim() || null, item: k < 0 ? null : rest.slice(k).trim() };
+}).filter(Boolean);
+
+const ofnAddManual = async () => {
+    if (!_ofnCtx) return;
+    const parsed = _ofnParseManual(document.getElementById('ofn-manual')?.value || '');
+    if (!parsed.length) return UI.toast.error('Type at least one line starting with the SN');
+    const sb = _diSb();
+    const start = _ofnCtx.rows.reduce((m, r) => Math.max(m, Number(r.line.line_no) || 0), 0);
+    const { error } = await sb.from('office_notice_lines').insert(parsed.map((p, i) => ({ notice_id: _ofnCtx.id, line_no: start + i + 1, ...p })));
+    if (error) return UI.toast.error('Not added: ' + error.message);
+    if (_ofnCtx.notice.status === 'saved') await sb.from('office_notices').update({ status: 'read' }).eq('id', _ofnCtx.id);
+    UI.toast.success(`${parsed.length} line${parsed.length === 1 ? '' : 's'} added`);
+    await openOfficeNotice(_ofnCtx.id);
+};
+
+const ofnReread = async () => {
+    if (!_ofnCtx || _ofnBusy) return;
+    if (_ofnCtx.rows.length && !confirm('Read the photo again? The lines below are replaced by the new read.')) return;
+    _ofnBusy = true;
+    UI.toast.success('Reading the photo (up to a minute)…');
+    let r;
+    try { r = await _ofnRead(_ofnCtx.id); } finally { _ofnBusy = false; }
+    if (!r.ok) UI.toast.error("The AI couldn't read it: " + r.detail);
+    await openOfficeNotice(_ofnCtx.id);
+};
+
+const ofnDiscard = async () => {
+    if (!_ofnCtx) return;
+    if (!confirm('Discard this photo? It drops off the list (nothing on the orders changes).')) return;
+    const { error } = await _diSb().from('office_notices').update({ status: 'discarded' }).eq('id', _ofnCtx.id).neq('status', 'applied');
+    if (error) return UI.toast.error('Not discarded: ' + error.message);
+    UI.toast.success('Discarded');
+    await openOfficeNotices();
+};
+
+// ── Per item: 📥 collected from office → 📲 customer told ──
+const _DI_STAGE = {
+    production: { icon: '🏭', label: 'In production', bg: 'var(--gray-100,#f3f4f6)', fg: 'var(--gray-600,#4b5563)' },
+    office: { icon: '🏢', label: 'Ready at office', bg: '#dbeafe', fg: '#1e40af' },
+    collected: { icon: '📥', label: 'With agent', bg: '#ede9fe', fg: '#5b21b6' },
+    told: { icon: '📲', label: 'Customer told', bg: '#fef3c7', fg: '#92400e' },
+    done: { icon: '✅', label: 'Handed over', bg: '#dcfce7', fg: '#166534' },
+};
+const _DI_STAGE_RANK = { production: 0, office: 1, collected: 2, told: 3, done: 4 };
+const _diStage = (r) => (!r ? 'production' : r.status !== 'pending' ? 'done' : r.customer_told_at ? 'told' : r.collected_at ? 'collected' : r.office_ready_date ? 'office' : 'production');
+
+const _diLoadNotices = async (items) => {
+    if (!_diCtx) return;
+    _diCtx.items = items;
+    _diCtx.notices = _diCtx.notices || new Map();
+    const ids = [...new Set(items.map(r => r.office_notice_id).filter(Boolean).map(String))].filter(id => !_diCtx.notices.has(id));
+    if (ids.length) {
+        try {
+            const { data } = await _diSb().from('office_notices').select('id,photo_path,place,collect_date,collect_time').in('id', ids);
+            (data || []).forEach(n => _diCtx.notices.set(String(n.id), n));
+        } catch (_) { /* no photo link */ }
+    }
+    if (!_diCtx.allUsers) _diCtx.allUsers = await AppDataStore.getAll('users').catch(() => []) || [];
+};
+
+const _diStageLines = (r) => {
+    if (r.status !== 'pending') return '';
+    const users = (_diCtx && _diCtx.allUsers) || [];
+    const who = (id) => { const u = users.find(x => String(x.id) === String(id)); return u ? (u.full_name || u.username || '') : ''; };
+    const out = [];
+    if (r.office_ready_date) {
+        const n = _diCtx && _diCtx.notices && _diCtx.notices.get(String(r.office_notice_id));
+        const photo = n && n.photo_path ? ` <a href="#" title="The office's photo" onclick="event.preventDefault();window._openAttachment&&window._openAttachment('${UI.escJsAttr(String(n.photo_path))}')">📷</a>` : '';
+        out.push(`🏢 Ready at office · ${escapeHtml(_ofnFmt(r.office_ready_date))}${r.office_ready_place ? ' · ' + escapeHtml(r.office_ready_place) : ''}${photo}`);
+    }
+    if (r.collected_at) out.push(`📥 Collected ${escapeHtml(_ofnFmt(r.collected_at))}${who(r.collected_by) ? ' · ' + escapeHtml(who(r.collected_by)) : ''} <a href="javascript:void(0)" title="Undo" onclick="event.stopPropagation();app.diUndoCollected(${Number(r.id)})" style="color:var(--gray-500);">✕</a>`);
+    if (r.customer_told_at) out.push(`📲 Customer told ${escapeHtml(_ofnFmt(r.customer_told_at))} <a href="javascript:void(0)" title="Undo" onclick="event.stopPropagation();app.diUndoTold(${Number(r.id)})" style="color:var(--gray-500);">✕</a>`);
+    return out.map(t => `<div style="font-size:11px;margin-top:3px;color:var(--gray-600,#4b5563);">${t}</div>`).join('');
+};
+
+const _diStageActions = (r) => {
+    if (r.status !== 'pending') return '';
+    return `${r.collected_at ? '' : `<button class="btn-sm secondary" style="white-space:nowrap;" title="Collected from the office" onclick="event.stopPropagation(); app.diMarkCollected(${Number(r.id)})">📥 Collected</button>`}
+        ${r.customer_told_at ? '' : `<button class="btn-sm secondary" style="white-space:nowrap;" title="WhatsApp the customer that it is ready" onclick="event.stopPropagation(); app.diTellCustomer(${Number(r.id)})">📲 Tell customer</button>`}`;
+};
+
+const diMarkCollected = async (itemId) => {
+    if (!_diCtx) return;
+    const { error } = await _diSb().from('delivery_items').update({ collected_at: _custLocalDay(), collected_by: _state.cu?.id || null }).eq('id', itemId).eq('status', 'pending');
+    if (error) return UI.toast.error('Not saved: ' + error.message);
+    UI.toast.success('📥 Collected from office');
+    await _diRefresh();
+};
+const diUndoCollected = async (itemId) => {
+    if (!_diCtx || !confirm('Undo "collected from office"?')) return;
+    const { error } = await _diSb().from('delivery_items').update({ collected_at: null, collected_by: null }).eq('id', itemId);
+    if (error) return UI.toast.error('Not saved: ' + error.message);
+    await _diRefresh();
+};
+const diUndoTold = async (itemId) => {
+    if (!_diCtx || !confirm('Undo "customer told"?')) return;
+    const { error } = await _diSb().from('delivery_items').update({ customer_told_at: null, customer_told_by: null }).eq('id', itemId);
+    if (error) return UI.toast.error('Not saved: ' + error.message);
+    await _diRefresh();
+};
+
+// The ready message — Chinese first, then English.
+const _diTellText = (name, itemNames) => {
+    const nm = String(name || '').trim();
+    const list = itemNames.map(s => String(s || '').trim()).filter(Boolean);
+    const zh = list.join('、') || '产品';
+    const en = list.join(', ') || 'order';
+    return `您好${nm ? ' ' + nm : ''}，您的 ${zh} 已经准备好了 🎉 请问您什么时候方便领取呢？\n\n`
+        + `Hi${nm ? ' ' + nm : ''}, your ${en} ${list.length > 1 ? 'are' : 'is'} ready for collection 🎉 When is a good time for you to collect?`;
+};
+
+const _diStandalone = () => {
+    try { return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true; } catch (_) { return false; }
+};
+
+// NOT async up to window.open: the popup needs the tap's user activation.
+// Tells the customer about this item plus the order's other pending items that
+// are already ready / collected and not told yet, in one message.
+const diTellCustomer = (itemId) => {
+    if (!_diCtx) return;
+    const items = _diCtx.items || [];
+    const me = items.find(r => String(r.id) === String(itemId));
+    if (!me || me.status !== 'pending') return;
+    const group = items.filter(r => r.status === 'pending' && !r.customer_told_at && (String(r.id) === String(itemId) || r.collected_at || r.office_ready_date));
+    const ids = group.map(r => r.id);
+    const num = waPhone(_diCtx.phone || '');
+    if (!num && !confirm('This customer has no phone number in the CRM. Mark as told anyway?')) return;
+    const markP = Promise.resolve(_diSb().from('delivery_items').update({ customer_told_at: new Date().toISOString(), customer_told_by: _state.cu?.id || null }).in('id', ids).eq('status', 'pending'));
+    const after = async () => {
+        let res = null;
+        try { res = await markP; } catch (e) { res = { error: e }; }
+        if (res && res.error) UI.toast.error('Not marked as told: ' + (res.error.message || res.error));
+        else UI.toast.success(`📲 Customer told (${ids.length} item${ids.length === 1 ? '' : 's'})`);
+        await _diRefresh();
+    };
+    if (!num) { after(); return; }
+    const url = `https://wa.me/${num}?text=${encodeURIComponent(_diTellText(_diCtx.custName, group.map(r => r.item_name)))}`;
+    if (_diStandalone()) {
+        // An installed app hands the page over to WhatsApp — save first.
+        (async () => { try { await Promise.race([markP, new Promise(res => setTimeout(res, 1200))]); } catch (_) { /* retried on return */ } window.location.href = url; })();
+        return;
+    }
+    window.open(url, '_blank', 'noopener');
+    after();
+};
+
+// Board: the furthest step any pending item of the line has reached.
+const _diLineStage = (its, deliveredFallback) => {
+    const pend = its.filter(r => r.status === 'pending');
+    const counts = { office: 0, collected: 0, told: 0 };
+    pend.forEach(r => { const s = _diStage(r); if (s in counts) counts[s]++; });
+    let stage = 'production';
+    if (!its.length) stage = deliveredFallback ? 'done' : 'production';
+    else if (!pend.length) stage = 'done';
+    else pend.forEach(r => { const s = _diStage(r); if (_DI_STAGE_RANK[s] > _DI_STAGE_RANK[stage]) stage = s; });
+    const office = pend.filter(r => r.office_ready_date).map(r => r.office_ready_date).sort()[0] || '';
+    const place = (pend.find(r => r.office_ready_date && r.office_ready_place) || {}).office_ready_place || '';
+    return { stage, counts, office, place, pending: pend.length };
+};
+const _diStageCell = (st) => {
+    const s = _DI_STAGE[st.stage] || _DI_STAGE.production;
+    const sub = st.stage === 'office' && st.office ? `<div style="font-size:11px;color:var(--gray-500);white-space:nowrap;">${escapeHtml(_ofnFmt(st.office))}${st.place ? ' · ' + escapeHtml(st.place) : ''}</div>` : '';
+    return `<span class="score-badge" style="font-size:11px;background:${s.bg};color:${s.fg};white-space:nowrap;">${s.icon} ${s.label}</span>${sub}`;
+};
+let _deliveryStageFilter = '';
+const _setDeliveryStageFilter = async (f) => {
+    _deliveryStageFilter = _deliveryStageFilter === f ? '' : f;
+    await _renderDeliveryListing();
+};
+
+
     app.register('customers', {
+        openOfficeNotices,
+        openOfficeNotice,
+        ofnUpload,
+        ofnConfirm,
+        ofnSaveHeader,
+        ofnEditSn,
+        ofnNotOurs,
+        ofnAddManual,
+        ofnReread,
+        ofnDiscard,
+        diMarkCollected,
+        diUndoCollected,
+        diTellCustomer,
+        diUndoTold,
+        _setDeliveryStageFilter,
+        // pure helpers (ci/test-office-notice.js)
+        _ofnClassify,
+        _ofnSnNorm,
+        _ofnNameMatch,
+        _ofnParseManual,
+        _diTellText,
+        _diLineStage,
         openDeliveryItems,
         diClose,
         diMarkAdvance,

@@ -95,7 +95,7 @@ const NOTIF_INBOX_LIMIT = 30;
 const _NOTIF_KIND_ICON = {
     activity_created: '📅', activity_reminder: '⏰', daily_summary: '🌅',
     coagent_invite: '🤝', coagent_response: '✅', highlight: '🌟', test: '🔔',
-    activity_changed: '✏️', activity_cancelled: '🚫', sale_approval: '💰', delivery_ready: '📦',
+    activity_changed: '✏️', activity_cancelled: '🚫', sale_approval: '💰', delivery_ready: '📦', office_ready: '🏢',
     event_invite: '🎯',
 };
 const _inboxSince = () => new Date(Date.now() - 30 * 86400000).toISOString();
@@ -209,7 +209,7 @@ const _inboxSectionHtml = (rows) => {
         // Morning summary carries today's Daily Wisdom — tapping opens the popup.
         const click = n.kind === 'daily_summary' ? 'app.openDailyWisdom()'
             : n.kind === 'sale_approval' ? 'app.openSaleApprovalsFromBell()'
-            : n.kind === 'delivery_ready' ? 'app.openDeliveryFromBell()'
+            : (n.kind === 'delivery_ready' || n.kind === 'office_ready') ? 'app.openDeliveryFromBell()'
             : `app.openNotifItem(${aid}, '${safeHash}')`;
         return `
             <div class="notif-item${unread ? ' notif-unread' : ''}" onclick="${click}" style="cursor:pointer;${unread ? 'background:var(--bg-elevated);' : ''}">
