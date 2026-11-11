@@ -1197,6 +1197,10 @@
 .mh-do-btn.wa { background:#25D366; }
 .mh-do-btn.wish { background:#EC4899; font-size:15px; }
 .mh-do-act { flex-shrink:0; font-size:12px !important; padding:6px 10px !important; white-space:nowrap; }
+.mh-do-more { flex-shrink:0; width:30px; height:38px; margin-left:-6px; border:none; background:none; border-radius:8px; color:var(--mh-ink-soft); font-size:20px; line-height:1; letter-spacing:1px; cursor:pointer; }
+.mh-do-more:active { background:var(--mh-line); }
+.mh-do-undo { font-size:12px; color:var(--mh-ink-soft); padding-top:8px; border-top:1px solid var(--mh-line); }
+.mh-do-undo .mh-link { padding:0; }
 .mh-bday { display:flex; align-items:center; gap:10px; width:100%; text-align:left; background:#fff; border:none; border-radius:14px; padding:10px 14px; margin-bottom:12px; box-shadow:var(--mh-shadow); cursor:pointer; font:inherit; }
 .mh-bday-ico { font-size:18px; }
 .mh-bday-text { flex:1; min-width:0; font-size:13px; color:var(--mh-ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

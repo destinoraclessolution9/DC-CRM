@@ -54,12 +54,18 @@ window._crmUtils = new Proxy({
     debounce: (fn) => fn, debounceCall: (k, fn) => fn(), USER_ROLES: [],
 }, { get: (t, k) => (k in t ? t[k] : () => false) });
 const appCalls = [];
+const hideCalls = [];
 window.app = new Proxy({
+    // same contract as chunks/script-autopilot.js _todoHideArgs
+    apTodoHideArgs: (r) => (['collect', 'touch', 'book'].includes(r.kind) ? `'${r.kind}', ${r.prospect_id ?? null}, ${r.customer_id ?? null}, ${r.ref_id ?? null}` : ''),
+    apTodoHide: async (...a) => { hideCalls.push(a); return '2026-10-28'; },
     apTodoActionHtml: (r) => r.kind === 'collect' ? `<button type="button" class="btn secondary btn-sm" onclick="app.openDeliveryItems('purchase', ${r.ref_id}, ${r.customer_id})">📦 Items</button>` : '',
 }, { get: (t, k) => (k in t ? t[k] : (...a) => { appCalls.push([k, ...a]); }) });
 const toasts = [];
+const modals = [];
+let modalsHidden = 0;
 window.UI = { toast: { success: (m) => toasts.push(['ok', m]), error: (m) => toasts.push(['err', m]), info: noop },
-    showModal: noop, hideModal: noop, money: (n) => 'RM ' + n, escJsAttr: (s) => String(s == null ? '' : s).replace(/'/g, "\\'") };
+    showModal: (t, c, b) => modals.push({ t, c, b }), hideModal: () => { modalsHidden++; }, money: (n) => 'RM ' + n, escJsAttr: (s) => String(s == null ? '' : s).replace(/'/g, "\\'") };
 global.UI = window.UI;
 const people = { 'customers:9': { id: 9, full_name: 'Ng <b>Jing</b> Yi', phone: '012-345 6789' }, 'prospects:5': { id: 5, full_name: 'No Phone', phone: '' } };
 window.AppDataStore = new Proxy({ getById: async (t, id) => people[`${t}:${id}`] || null }, { get: (t, k) => (k in t ? t[k] : asyncNoop) });
@@ -96,7 +102,7 @@ function loadChunk(file, names) {
     eval(src.slice(0, close) + bag + src.slice(close));
     return window.__T_home;
 }
-const M = loadChunk('chunks/script-mobile.js', ['_mhGoalHtml', '_mhTodayHtml', '_mhDoRowHtml', '_mhIsMine', 'mhomeTodoWa']);
+const M = loadChunk('chunks/script-mobile.js', ['_mhGoalHtml', '_mhTodayHtml', '_mhDoRowHtml', '_mhIsMine', 'mhomeTodoWa', 'mhomeTodoMore', 'mhomeTodoHide']);
 
 (async () => {
     // ── goal line ───────────────────────────────────────────────────────────
@@ -148,6 +154,22 @@ const M = loadChunk('chunks/script-mobile.js', ['_mhGoalHtml', '_mhTodayHtml', '
     ok('do: name escaped, customer opened as customer', col.includes('Tan &lt;i&gt;') && col.includes("app.apOpen('customer', 9)"));
     const dr = M._mhDoRowHtml({ kind: 'draft', icon: '💬', name: 'Lee', why: '推荐名单致谢 · today', draftId: 31, pid: 77, isCust: false, phone: "01'2" }, 3);
     ok('do: follow-up draft → WhatsApp + refresh', dr.includes("app.mhomeFollowupWa(31, '77', '01\\'2', false)") && dr.includes('mhomeTodoRefresh'));
+
+    // ── ⋯ Later / Not now (2026-11-11) ─────────────────────────────────────
+    ok('do: journey row has ⋯ with its identity', col.includes("app.mhomeTodoMore('collect', 4, 9, 700)") && col.includes('class="mh-do-more"'));
+    ok('do: ⋯ does not open the person', /onclick="event\.stopPropagation\(\);app\.mhomeTodoMore/.test(col));
+    ok('do: ⋯ label names the person, escaped', col.includes('aria-label="Later or not now for Tan &lt;i&gt;"'));
+    ok('do: follow-up draft has no ⋯', !dr.includes('mhomeTodoMore'));
+    ok('do: a kind that cannot be hidden has no ⋯', !M._mhDoRowHtml({ kind: 'weird', icon: '?', prospect_id: 1, name: 'X', why: '' }, 0).includes('mhomeTodoMore'));
+    M.mhomeTodoMore('collect', 4, 9, 700);
+    const sheet = modals.pop();
+    ok('⋯: sheet offers Later (7 days) + Not now (30 days)', !!sheet && sheet.c.includes("app.mhomeTodoHide('collect', 4, 9, 700, 'later')") && sheet.c.includes("app.mhomeTodoHide('collect', 4, 9, 700, 'not_now')") && /back on \d+ \w+/.test(sheet.c) && sheet.c.includes('30 days'));
+    ok('⋯: sheet says the leader still sees it', sheet.c.includes('Your leader still sees it'));
+    M.mhomeTodoMore("x');alert(1);//", 1, null, null);
+    ok('⋯: kind cannot break out of the onclick', !modals.pop().c.includes("alert(1)"));
+    const hid0 = modalsHidden;
+    await M.mhomeTodoHide('collect', 4, 9, 700, 'not_now');
+    ok('⋯: choice closes the sheet and hides through autopilot', modalsHidden === hid0 + 1 && JSON.stringify(hideCalls.pop()) === JSON.stringify(['collect', 4, 9, 700, 'not_now']));
 
     // ── journey WhatsApp step sent from Home ────────────────────────────────
     tpRow = { id: 88, title: '📦 Step 3 — 准备领取通知WA', message_template: '嗨 {name}！好消息 🎉', customer_id: 9, prospect_id: null };

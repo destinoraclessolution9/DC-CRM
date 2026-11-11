@@ -1044,10 +1044,11 @@
         }
         _mhomeTodoReload = async () => {
             const rows = await _mhomeLoadTodo();
-            if (rows) { cachedTodo = rows; _mhomeLsSet(_mhomeTodoKey, rows); }
+            if (rows) { cachedTodo = rows; _mhomeLsSet(_mhomeTodoKey, rows); _mhomeTodoDirty = false; }
             _mhomeRepaint();
         };
-        if (!cachedTodo) _mhomeTodoReload().catch(() => {});
+        // stale after a save → keep showing the cached rows, refetch behind them
+        if (!cachedTodo || _mhomeTodoDirty) _mhomeTodoReload().catch(() => {});
         {
             const _tomStr = `${tom.getFullYear()}-${String(tom.getMonth() + 1).padStart(2, '0')}-${String(tom.getDate()).padStart(2, '0')}`;
             AppDataStore.queryAdvanced('activities', {
@@ -1195,6 +1196,7 @@
             ${cachedTodo == null && !_draftRows.length
                 ? '<div class="mh-muted">Loading…</div>'
                 : (_mhDoRows.length ? _mhDoRows.slice(0, 5).map((r, i) => _mhDoRowHtml(r, i)).join('') : '<div class="mh-muted">Nothing urgent today 🎉</div>')}
+            ${typeof window.app.apTodoUndoHtml === 'function' ? (window.app.apTodoUndoHtml('mobile') || '') : ''}
         </div>`;
 
         // Birthdays: one line, only today / tomorrow.
@@ -1761,6 +1763,19 @@
     // ── Home "Today" helpers (2026-10-26) ───────────────────────────────────
     let _mhDoRows = [];            // Do-today rows of the last paint (sheet + taps)
     let _mhomeTodoReload = null;   // set by showMobileHomeView: refetch + repaint
+    // A save that can clear a row (meeting booked, item handed over…) makes the
+    // 5-minute Do-today cache stale: the next Home paint refetches (2026-11-11).
+    // A flag, not a localStorage delete — see the iOS freeze note below.
+    let _mhomeTodoDirty = false;
+    if (!window.__mhTodoDataHook && typeof window.addEventListener === 'function') {
+        window.__mhTodoDataHook = true;
+        const _tables = new Set(['activities', 'delivery_items', 'purchases', 'journey_touchpoints', 'pop_installments',
+            'delivery_advances', 'prospect_attachments', 'prospects', 'customers', 'event_attendees']);
+        window.addEventListener('dataChanged', (e) => {
+            const d = (e && e.detail) || {};
+            if (['add', 'update', 'delete', 'deleteMany'].includes(d.action) && _tables.has(d.table)) _mhomeTodoDirty = true;
+        });
+    }
     // My own day: activities I lead or co-run (managers L1–L2 see everyone's).
     const _mhIsMine = (a) => {
         const cu = _state.cu;
@@ -1860,6 +1875,11 @@
         const openJs = r.kind === 'draft'
             ? (r.pid != null ? `app.mcalOpenPerson('${r.pid}', ${!!r.isCust})` : '')
             : (id != null ? `app.apOpen('${kind}', ${Number(id)})` : '');
+        // ⋯ → Later / Not now (journey rows only; follow-up drafts expire on their own)
+        const hideArgs = r.kind !== 'draft' && typeof window.app.apTodoHideArgs === 'function' ? window.app.apTodoHideArgs(r) : '';
+        const more = hideArgs
+            ? `<button type="button" class="mh-do-more" onclick="event.stopPropagation();app.mhomeTodoMore(${hideArgs})" aria-label="Later or not now for ${_mhomeEsc(r.name || 'this row')}">⋯</button>`
+            : '';
         return `
             <div class="mh-do-row${i ? '' : ' first'}"${openJs ? ` onclick="${openJs}"` : ''}>
                 <span class="mh-do-ico">${_mhomeEsc(r.icon || '•')}</span>
@@ -1867,9 +1887,35 @@
                     <div class="mh-do-name">${_mhomeEsc(r.name || '')}</div>
                     <div class="mh-do-why">${_mhomeEsc(r.why || '')}</div>
                 </div>
-                ${btn}
+                ${btn}${more}
             </div>`;
     };
+    // ⋯ on a Do-today row: a small sheet with the two choices.
+    const _mhSameRow = (r, kind, pid, cid, ref) => {
+        const n = (v) => (v == null || v === '' ? null : Number(v));
+        return r && r.kind === kind && n(r.prospect_id) === n(pid) && n(r.customer_id) === n(cid) && n(r.ref_id) === n(ref);
+    };
+    const mhomeTodoMore = (kind, pid, cid, ref) => {
+        const r = _mhDoRows.find(x => _mhSameRow(x, kind, pid, cid, ref));
+        const a = `'${String(kind).replace(/[^a-z_]/g, '')}', ${pid == null ? 'null' : Number(pid)}, ${cid == null ? 'null' : Number(cid)}, ${ref == null ? 'null' : Number(ref)}`;
+        const day = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); };
+        UI.showModal(r ? (r.name || 'Not today?') : 'Not today?', `
+            ${r ? `<div class="mh-muted" style="margin:-4px 0 12px;">${_mhomeEsc(r.why || '')}</div>` : ''}
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <button type="button" class="btn secondary" style="justify-content:flex-start;text-align:left;" onclick="app.mhomeTodoHide(${a}, 'later')">⏰ Later — back on ${day(7)}</button>
+                <button type="button" class="btn secondary" style="justify-content:flex-start;text-align:left;" onclick="app.mhomeTodoHide(${a}, 'not_now')">✕ Not now — hide for 30 days</button>
+            </div>
+            <div class="mh-muted" style="margin-top:10px;">Only your own list. Your leader still sees it.</div>`,
+        [{ label: 'Cancel', action: 'UI.hideModal()' }]);
+    };
+    const mhomeTodoHide = async (kind, pid, cid, ref, action) => {
+        UI.hideModal();
+        if (typeof window.app.apTodoHide !== 'function') { UI.toast.error('Not ready yet — try again in a moment'); return; }
+        await window.app.apTodoHide(kind, pid, cid, ref, action);
+        // the Do today card refreshes through apTodoHide; make sure even if it was off screen
+        _mhomeTodoDirty = true;
+    };
+    const mhomeTodoRows = () => _mhDoRows;
     // journey_daily_todo (money × urgency, one row per person) + each journey
     // step's type, so a WhatsApp step gets a WhatsApp button.
     const _mhomeLoadTodo = async () => {
@@ -4847,6 +4893,9 @@
         mhomeTodoWa,
         mhomeTodoDone,
         mhomeTodoRefresh,
+        mhomeTodoMore,
+        mhomeTodoHide,
+        mhomeTodoRows,
         mhomeOpenBirthdays,
         mhomeRecordSale,
         mhomeOpenRefills,

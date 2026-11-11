@@ -85,6 +85,98 @@
         return '';
     };
 
+    // ── ⏰ Later / ✕ Not now (owner 2026-11-11: the list "never get updated") ──
+    // Hides one row from MY list and my morning push (journey_todo_hide); a
+    // leader's to-do view still shows it, marked. Later = 7 days, Not now = 30.
+    const _HIDE_KINDS = new Set(['collect', 'gr', 'cps', 'book', 'touch', 'pop', 'advance', 'minutes', 'photo']);
+    const _num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? 'null' : String(Number(v)));
+    // kind + ids as JS call arguments ('' when the row cannot be hidden)
+    const _todoHideArgs = (r) => (r && _HIDE_KINDS.has(r.kind)
+        ? `'${r.kind}', ${_num(r.prospect_id)}, ${_num(r.customer_id)}, ${_num(r.ref_id)}`
+        : '');
+    const _addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return _ymd(d); };
+    const _todoHideHtml = (r) => {
+        const a = _todoHideArgs(r);
+        if (!a) return '';
+        const b = (label, action, days, what) => `<button type="button" class="ap-todo-hide" title="${what} — back on ${esc(_fmt(_addDays(days)))}" aria-label="${what}: hide ${esc(r.name || 'this row')} for ${days} days" onclick="event.stopPropagation();app.apTodoHide(${a}, '${action}')" style="flex-shrink:0;font-size:11px;padding:3px 4px;background:none;border:none;color:var(--gray-500);cursor:pointer;white-space:nowrap;text-decoration:underline;text-underline-offset:2px;">${label}</button>`;
+        return b('Later', 'later', 7, 'Later') + b('Not now', 'not_now', 30, 'Not now');
+    };
+    let _lastHide = null;   // { kind, pid, cid, ref, name, until, at } → the Undo line
+    const _todoUndoHtml = (variant) => {
+        if (!_lastHide || Date.now() - _lastHide.at > 5 * 60e3) return '';
+        const txt = `Hid ${esc(_lastHide.name || 'a row')} — back on ${esc(_fmt(_lastHide.until))}`;
+        return variant === 'mobile'
+            ? `<div class="mh-do-undo">${txt} · <button type="button" class="mh-link" onclick="event.stopPropagation();app.apTodoUndo()">Undo</button></div>`
+            : `<div style="font-size:12px;color:var(--gray-500);padding-top:7px;border-top:1px solid var(--gray-100);">${txt} · <button type="button" onclick="event.stopPropagation();app.apTodoUndo()" style="font-size:12px;padding:0;background:none;border:none;color:#2563EB;cursor:pointer;font-weight:600;">Undo</button></div>`;
+    };
+    // Anything that can change the list: redraw the desktop card and the phone's Do today.
+    const _todoChanged = () => {
+        _todoAt = 0;
+        _todoP = null;
+        if (document.getElementById('ap-top5')) apRenderTop5(true);
+        // only when the phone Home is on screen (its chunk is loaded then)
+        if (document.getElementById('mhome-do') && typeof app.mhomeTodoRefresh === 'function') {
+            try { app.mhomeTodoRefresh(); } catch (_) { /* best-effort */ }
+        }
+    };
+    const apTodoHide = async (kind, pid, cid, ref, action = 'later') => {
+        if (!_HIDE_KINDS.has(kind)) return null;
+        const sb = _sb();
+        if (!sb) { UI.toast.error('Offline — try again in a moment'); return null; }
+        try {
+            const { data, error } = await sb.rpc('journey_todo_hide', {
+                p_kind: kind, p_prospect_id: pid, p_customer_id: cid, p_ref_id: ref,
+                p_action: action === 'not_now' ? 'not_now' : 'later',
+            });
+            if (error) throw error;
+            const pool = [...(_todoLast || []), ...((typeof app.mhomeTodoRows === 'function' && document.getElementById('mhome-do')) ? (app.mhomeTodoRows() || []) : [])];
+            const row = pool.find(r => r && r.kind === kind && _num(r.prospect_id) === _num(pid)
+                && _num(r.customer_id) === _num(cid) && _num(r.ref_id) === _num(ref));
+            _lastHide = { kind, pid, cid, ref, name: row ? row.name : '', until: data, at: Date.now() };
+            UI.toast.success(`Hidden — back on ${_fmt(data)}`);
+            _todoChanged();
+            return data;
+        } catch (e) {
+            UI.toast.error('Could not hide it: ' + (e && e.message ? e.message : e));
+            return null;
+        }
+    };
+    const apTodoUndo = async () => {
+        const h = _lastHide;
+        if (!h) return false;
+        const sb = _sb();
+        if (!sb) { UI.toast.error('Offline — try again in a moment'); return false; }
+        try {
+            const { error } = await sb.rpc('journey_todo_unhide', {
+                p_kind: h.kind, p_prospect_id: h.pid, p_customer_id: h.cid, p_ref_id: h.ref,
+            });
+            if (error) throw error;
+            _lastHide = null;
+            UI.toast.success('Back on your list');
+            _todoChanged();
+            return true;
+        } catch (e) {
+            UI.toast.error('Could not undo: ' + (e && e.message ? e.message : e));
+            return false;
+        }
+    };
+    // A save anywhere (book the meeting, hand over the item, attach the photo…)
+    // can clear a row: drop the cache and redraw a moment later (the DB triggers
+    // have run by the time the save returns).
+    const _TODO_TABLES = new Set(['activities', 'delivery_items', 'purchases', 'journey_touchpoints', 'pop_installments',
+        'delivery_advances', 'prospect_attachments', 'prospects', 'customers', 'event_attendees', 'audit_prescriptions', 'pipeline_deals']);
+    if (!window.__apTodoDataHook && typeof window.addEventListener === 'function') {
+        window.__apTodoDataHook = true;
+        let _dt = null;
+        window.addEventListener('dataChanged', (e) => {
+            const d = (e && e.detail) || {};
+            if (!['add', 'update', 'delete', 'deleteMany'].includes(d.action) || !_TODO_TABLES.has(d.table)) return;
+            clearTimeout(_dt);
+            _dt = setTimeout(_todoChanged, 1200);
+        });
+    }
+
+    let _todoLast = [];
     const _todoHtml = (rows) => {
         const head = `
             <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px;">
@@ -92,7 +184,8 @@
                 <span style="font-size:11px;color:var(--gray-500);">ranked by money × urgency</span>
             </div>`;
         if (rows === null) return head + '<div style="font-size:13px;color:var(--gray-500);">Could not load right now.</div>';
-        if (!rows.length) return head + '<div style="font-size:13px;color:var(--gray-500);">Nothing urgent today 🎉</div>';
+        _todoLast = rows;
+        if (!rows.length) return head + '<div style="font-size:13px;color:var(--gray-500);">Nothing urgent today 🎉</div>' + _todoUndoHtml();
         return head + rows.map((r, i) => {
             const kind = r.customer_id != null ? 'customer' : 'prospect';
             const id = r.customer_id != null ? Number(r.customer_id) : Number(r.prospect_id);
@@ -104,9 +197,9 @@
                         <span style="font-weight:700;color:#047857;margin-left:4px;">${esc(_rmK(r.rm))}</span></div>
                     <div style="font-size:12px;color:var(--gray-600);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.why || '')}</div>
                 </div>
-                ${_todoAction(r)}
+                ${_todoAction(r)}${_todoHideHtml(r)}
             </div>`;
-        }).join('');
+        }).join('') + _todoUndoHtml();
     };
 
     const apRenderTop5 = async (force = false) => {
@@ -1382,6 +1475,10 @@
         apMountTop5,
         apRenderTop5,
         apTodoActionHtml: _todoAction,
+        apTodoHide,
+        apTodoUndo,
+        apTodoHideArgs: _todoHideArgs,
+        apTodoUndoHtml: _todoUndoHtml,
         apFestLoad,
         apMountFestival,
         apRenderFestival,

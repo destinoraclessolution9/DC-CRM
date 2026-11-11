@@ -5338,13 +5338,17 @@ const plShowTodoFor = async (idsCsv, label) => {
         // only kinds with a real deadline can be overdue ("book" / "cps" carry the last-met date)
         const late = r.due && String(r.due) < today && ['collect', 'gr', 'touch', 'pop', 'advance'].includes(r.kind);
         const open = r.customer_id != null ? `app.showCustomerDetail(${Number(r.customer_id)})` : `app.showProspectDetail(${Number(r.prospect_id)})`;
+        // the agent put it away (Later / Not now on their own list, 2026-11-11)
+        const hidden = r.hidden_until
+            ? `<div class="plg-muted" style="font-size:12px;">💤 Agent chose ${r.hidden_action === 'not_now' ? '“Not now”' : '“Later”'} — off their list till ${esc(new Date(String(r.hidden_until).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</div>`
+            : '';
         return `
         <div style="display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-top:1px solid #F3F4F6;">
             <span style="font-size:17px;">${esc(r.icon || '•')}</span>
             <div style="flex:1;min-width:0;">
                 <a href="javascript:void(0)" onclick="UI.hideModal();${open}" style="font-weight:700;color:#2563EB;">${esc(r.name || '')}</a>
                 <span style="font-weight:700;color:#047857;margin-left:4px;">${_plRmK(r.rm)}</span>
-                <div style="font-size:12px;${late ? 'color:#B91C1C;' : ''}">${esc(r.why || '')}${late ? ' ⏰' : ''}</div>
+                <div style="font-size:12px;${late ? 'color:#B91C1C;' : ''}">${esc(r.why || '')}${late ? ' ⏰' : ''}</div>${hidden}
                 ${ids.length > 1 ? `<div class="plg-muted">${esc(uName(r.agent_id))}</div>` : ''}
             </div>
         </div>`;

@@ -84,9 +84,11 @@ const modals = [];
 let hidden = 0;
 const appCalls = [];
 const created = [];
+const winListeners = {};
 const win = {
   innerWidth: 1280,
   supabase,
+  addEventListener: (ev, fn) => { (winListeners[ev] = winListeners[ev] || []).push(fn); },
   _appState: { cu: { id: 42, full_name: 'Agent Kim', role: 'Level 9 Agent' } },
   _crmUtils: {
     escapeHtml: (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])),
@@ -165,7 +167,62 @@ const runTimers = async () => { while (timers.length) { const t = timers.shift()
   check('customer row opens customer', html.includes("app.apOpen('customer', 9)"), true);
   check('minutes row → opens the minutes form of that meeting', html.includes('app.openPostMeetupNotesModal(4242, 15)'), true);
   check('prospect row opens prospect', html.includes("app.apOpen('prospect', 11)"), true);
-  check('gr row has no action button', /Golden Road 2\/6[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/.test(html), true);
+  const grRow = html.slice(html.indexOf('Golden Road 2/6'), html.indexOf('</div>', html.indexOf('Golden Road 2/6') + 400) + 400).split('ap-todo-row')[0];
+  check('gr row has no action button', grRow.includes('class="btn secondary'), false);
+
+  // ── ⏰ Later / ✕ Not now (2026-11-11) ──
+  check('every row has Later + Not now', (html.match(/app\.apTodoHide\(/g) || []).length, 10);
+  check('Later carries kind + ids (customer row)', html.includes("app.apTodoHide('collect', 5, 9, 700, 'later')"), true);
+  check('Not now carries kind + ids (prospect row, no ref)', html.includes("app.apTodoHide('cps', 11, null, null, 'not_now')"), true);
+  check('hide buttons stop the row click', /onclick="event\.stopPropagation\(\);app\.apTodoHide/.test(html), true);
+  check('Later says when it comes back', /title="Later — back on 28 Oct"/.test(html), true);
+  check('aria-label names the person, escaped', html.includes('aria-label="Later: hide Ng &lt;b&gt;Jing&lt;/b&gt; for 7 days"'), true);
+  check('unknown kind → no hide buttons', app.apTodoHideArgs({ kind: 'weird', prospect_id: 1 }), '');
+  check('bad ids → null, never raw text', app.apTodoHideArgs({ kind: 'book', prospect_id: '1);alert(1', customer_id: undefined, ref_id: '' }), "'book', null, null, null");
+
+  rpcData.journey_todo_hide = (a) => (a.p_action === 'not_now' ? '2026-11-20' : '2026-10-28');
+  calls.length = 0; toasts.length = 0;
+  rpcData.journey_daily_todo = rpcData.journey_daily_todo.slice(1);   // the server drops the hidden row
+  const until = await app.apTodoHide('collect', 5, 9, 700, 'later');
+  await flush(); await flush();
+  const hc = calls.find(c => c.rpc === 'journey_todo_hide');
+  check('hide → RPC with the row identity', hc && JSON.stringify(hc.args), JSON.stringify({ p_kind: 'collect', p_prospect_id: 5, p_customer_id: 9, p_ref_id: 700, p_action: 'later' }));
+  check('hide → returns the date', until, '2026-10-28');
+  check('hide → toast with the return date', toasts.some(t => t[0] === 'ok' && t[1] === 'Hidden — back on 28 Oct'), true);
+  check('hide → card refetched (cache dropped)', calls.filter(c => c.rpc === 'journey_daily_todo').length, 1);
+  const afterHide = byId.get('ap-top5').innerHTML;
+  check('hide → row gone from the card', afterHide.includes("app.apOpen('customer', 9)"), false);
+  check('hide → undo line names the person', afterHide.includes('Hid Ng &lt;b&gt;Jing&lt;/b&gt; — back on 28 Oct') && afterHide.includes('app.apTodoUndo()'), true);
+  check('mobile undo line variant', app.apTodoUndoHtml('mobile').includes('class="mh-do-undo"'), true);
+
+  rpcData.journey_todo_unhide = true;
+  calls.length = 0; toasts.length = 0;
+  const undone = await app.apTodoUndo();
+  await flush(); await flush();
+  const uc = calls.find(c => c.rpc === 'journey_todo_unhide');
+  check('undo → RPC with the same identity', uc && JSON.stringify(uc.args), JSON.stringify({ p_kind: 'collect', p_prospect_id: 5, p_customer_id: 9, p_ref_id: 700 }));
+  check('undo → toast + undo line gone', undone === true && toasts.some(t => t[1] === 'Back on your list') && !byId.get('ap-top5').innerHTML.includes('apTodoUndo'), true);
+  check('undo twice → nothing to undo', await app.apTodoUndo(), false);
+
+  await app.apTodoHide('cps', 11, null, null, 'not_now');
+  check('not now → RPC action not_now', calls.some(c => c.rpc === 'journey_todo_hide' && c.args.p_action === 'not_now' && c.args.p_ref_id === null), true);
+  calls.length = 0;
+  check('unknown kind → no RPC', (await app.apTodoHide('weird', 1, null, null)) === null && !calls.some(c => c.rpc === 'journey_todo_hide'), true);
+  rpcData.journey_todo_hide = new Error('not signed in');
+  toasts.length = 0;
+  check('hide fails → error toast, no undo', (await app.apTodoHide('book', 1, null, null)) === null && toasts.some(t => t[0] === 'err' && /Could not hide it/.test(t[1])), true);
+
+  // a save elsewhere (meeting booked) → card redraws without waiting for the 60 s cache
+  const dc = (winListeners.dataChanged || [])[0];
+  check('listens for saves', typeof dc, 'function');
+  timers.length = 0; calls.length = 0;
+  dc({ detail: { action: 'revalidate', table: 'activities' } });
+  dc({ detail: { action: 'add', table: 'notes' } });
+  check('revalidate / unrelated table → no refresh queued', timers.length, 0);
+  dc({ detail: { action: 'add', table: 'activities' } });
+  check('activity saved → refresh queued', timers.length, 1);
+  await runTimers(); await flush();
+  check('activity saved → list refetched', calls.filter(c => c.rpc === 'journey_daily_todo').length, 1);
   app.apMountTop5();
   check('mount is idempotent', parent.inserted.length, 1);
 
