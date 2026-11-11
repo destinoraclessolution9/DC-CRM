@@ -3214,7 +3214,10 @@ const _renderDeliveryListing = async () => {
     const tabsHtml = stageRow + `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${tab('all', 'All', cAll)}${tab('full', 'Full Payment', cFull)}${tab('installment', 'Installment', cInst)}<button class="btn btn-sm secondary" style="margin-left:auto;" onclick="app.openAgentAdvances('owed')">🤝 Agent advances${_advN ? ` (${_advN} owed)` : ''}</button><button class="btn btn-sm secondary" onclick="app.openCancellations('requested')">❌ Cancellations</button></div>`;
 
     if (!rows.length) {
-        body.innerHTML = tabsHtml + `<div style="text-align:center;color:var(--gray-400);padding:32px;">${_deliveryShowDelivered ? 'No product lines found.' : 'No pending deliveries. 🎉'}</div>`;
+        const _emptyMsg = _deliveryStageFilter
+            ? `Nothing at "${_DI_STAGE[_deliveryStageFilter].label}" right now — tap the chip again to show all.`
+            : (_deliveryShowDelivered ? 'No product lines found.' : 'No pending deliveries. 🎉');
+        body.innerHTML = tabsHtml + `<div style="text-align:center;color:var(--gray-400);padding:32px;">${escapeHtml(_emptyMsg)}</div>`;
         return;
     }
 

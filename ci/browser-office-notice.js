@@ -161,7 +161,11 @@ async function main() {
         await sleep(300);
         const filtered = await page.evaluate(() => document.getElementById('delivery-listing-body')?.innerText || '');
         check('🏢 chip filters the board to that line', /Oo Kean Cherng/.test(filtered) && !/Tan Soo Chi/.test(filtered), filtered.slice(0, 400));
-        await page.evaluate(() => window.app._setDeliveryStageFilter('office'));
+        await page.evaluate(() => window.app._setDeliveryStageFilter('told'));
+        await sleep(300);
+        const empty = await page.evaluate(() => document.getElementById('delivery-listing-body')?.innerText || '');
+        check('a step with nothing on it says so (not "No pending deliveries")', /Nothing at "Customer told" right now/.test(empty) && !/No pending deliveries/.test(empty), empty.slice(-200));
+        await page.evaluate(() => window.app._setDeliveryStageFilter('told'));
 
         console.log('\nDesktop · notices list + review');
         await page.evaluate(() => window.app.openOfficeNotices());
