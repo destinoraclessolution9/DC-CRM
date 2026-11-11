@@ -3903,7 +3903,7 @@ const _OFN_T2S = new Map(['財财', '庫库', '龍龙', '貞贞', '寶宝', '萬
     '氣气', '豐丰', '戰战', '擇择', '據据', '際际', '隨随', '點点', '讀读', '誠诚', '說说', '證证', '識识', '議议',
     '讓让', '變变', '處处', '師师', '歸归', '擁拥', '層层', '屬属', '區区', '單单', '嚴严', '團团', '園园', '國国',
     '圍围', '齊齐', '龜龟', '錦锦', '繡绣', '網网', '聯联', '總总', '鐘钟', '鐵铁', '鏡镜', '閣阁', '關关', '雞鸡',
-    '魚鱼', '鶴鹤', '獅狮', '馬马', '騰腾'].map(p => [p[0], p[1]]));
+    '魚鱼', '鶴鹤', '獅狮', '馬马', '騰腾', '創创', '奮奋', '鉅钜', '轉转'].map(p => [p[0], p[1]]));
 const _ofnSimp = (s) => String(s || '').replace(/[㐀-鿿]/g, ch => _OFN_T2S.get(ch) || ch);
 // Same rule as public.office_sn_norm: letters + digits only, a leading PR / PRN
 // in front of a digit dropped ("PR 1936760" → 1936760, "SG 0000013" → SG0000013).
@@ -4103,9 +4103,61 @@ const openOfficeNotices = async () => {
         </div>
         ${notices.length ? `<div class="prospects-table-container"><table class="prospects-table"><thead><tr>
             <th scope="col">Uploaded</th><th scope="col">Sheet</th><th scope="col">Collect</th><th scope="col">Lines done</th><th scope="col">Status</th><th scope="col"></th>
-        </tr></thead><tbody>${rows}</tbody></table></div>` : '<div style="text-align:center;color:var(--gray-400);padding:20px;">No office photos uploaded yet.</div>'}`,
+        </tr></thead><tbody>${rows}</tbody></table></div>` : '<div style="text-align:center;color:var(--gray-400);padding:20px;">No office photos uploaded yet.</div>'}
+        <details id="ofn-lead" style="margin-top:16px;border-top:1px solid var(--border,#e7e5e4);padding-top:12px;" ontoggle="this.open && app.ofnLeadLoad()">
+            <summary style="cursor:pointer;font-weight:600;">⏱ How long pieces really take <span style="font-weight:400;color:var(--gray-500);font-size:12px;">order → ready at the office</span></summary>
+            <div id="ofn-lead-body" style="margin-top:8px;font-size:12px;color:var(--gray-500);">Loading…</div>
+        </details>`,
         [{ label: '← Delivery list', type: 'secondary', action: 'app.openDeliveryListing()' }], 'fullscreen');
     (window.app.applyMobileTableLabels || (() => {}))();
+};
+
+// ── ⏱ real production times (Phase 3, owner 2026-11-11) ──
+// public.office_lead_times(): per product group, the days from the order to the
+// day the office said "ready" (every sheet read + the old sheets), next to the
+// lead time the CRM uses for ready dates. Shown only; the owner decides changes.
+const _ofnSpan = (d) => {
+    const n = Number(d);
+    if (d == null || d === '' || !Number.isFinite(n)) return '—';
+    return n < 45 ? `${n} days` : `${(n / 30).toFixed(1).replace(/\.0$/, '')} months`;
+};
+const _ofnLeadHtml = (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return '<div style="padding:8px 0;">No office sheet matched to our sales yet. Every sheet you upload adds its pieces here.</div>';
+    const total = list.reduce((s, r) => s + (Number(r.pieces) || 0), 0);
+    const pill = (txt, bg, fg) => ` <span class="score-badge" style="font-size:10px;background:${bg};color:${fg};">${txt}</span>`;
+    const body = list.map(r => {
+        const set = r.set_days == null || r.set_days === '' ? null : Number(r.set_days);
+        const mid = Number(r.median_days), n = Number(r.pieces) || 0;
+        const diff = set == null || !Number.isFinite(mid) ? null : mid - set;
+        const tag = diff == null ? '' : diff <= -30 ? pill('faster than set', '#dcfce7', '#166534')
+            : diff >= 30 ? pill('slower than set', '#fef3c7', '#92400e') : pill('about right', '#f1f5f9', '#475569');
+        return `<tr>
+            <td data-label="Product group">${escapeHtml(r.grp || 'Other')}${r.examples ? `<div style="font-size:11px;color:var(--gray-500);">${escapeHtml(r.examples)}</div>` : ''}</td>
+            <td data-label="CRM uses" style="white-space:nowrap;">${set == null ? '— no date' : escapeHtml(_ofnSpan(set))}</td>
+            <td data-label="Really took" style="white-space:nowrap;"><b>${escapeHtml(_ofnSpan(mid))}</b>${tag}</td>
+            <td data-label="Range" style="white-space:nowrap;">${escapeHtml(_ofnSpan(r.min_days))} – ${escapeHtml(_ofnSpan(r.max_days))}</td>
+            <td data-label="Pieces" style="white-space:nowrap;">${n} piece${n === 1 ? '' : 's'}${n < 3 ? '<div style="font-size:11px;color:var(--gray-400);">too few to trust</div>' : ''}</td>
+        </tr>`;
+    }).join('');
+    return `<div class="prospects-table-container"><table class="prospects-table"><thead><tr>
+            <th scope="col">Product group</th><th scope="col">CRM uses</th><th scope="col">Really took (middle)</th><th scope="col">Range</th><th scope="col">Pieces</th>
+        </tr></thead><tbody>${body}</tbody></table></div>
+        <div style="font-size:11px;color:var(--gray-500);margin-top:6px;">From ${total} piece${total === 1 ? '' : 's'} on the office sheets: order date → the day the office said "ready". Wrong order dates and promos delivered over more than a year are left out. The CRM's lead times change only when you decide.</div>`;
+};
+const ofnLeadLoad = async () => {
+    const box = document.getElementById('ofn-lead-body');
+    if (!box) return;
+    const sb = _diSb();
+    try {
+        if (!sb) throw new Error('offline');
+        const { data, error } = await sb.rpc('office_lead_times');
+        if (error) throw error;
+        box.innerHTML = _ofnLeadHtml(data);
+        (window.app.applyMobileTableLabels || (() => {}))();
+    } catch (e) {
+        box.textContent = 'Could not load: ' + (e?.message || e);
+    }
 };
 
 const ofnUpload = async (input) => {
@@ -4497,7 +4549,9 @@ const _setDeliveryStageFilter = async (f) => {
         diTellCustomer,
         diUndoTold,
         _setDeliveryStageFilter,
+        ofnLeadLoad,
         // pure helpers (ci/test-office-notice.js)
+        _ofnLeadHtml,
         _ofnClassify,
         _ofnSnNorm,
         _ofnNameMatch,

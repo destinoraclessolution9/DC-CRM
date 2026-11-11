@@ -84,6 +84,10 @@ const installFakes = () => {
     const rpc = async (name, args) => {
         window.__calls.push(['rpc', name, args]);
         if (name === 'office_notice_candidates') return { data: window.__cands, error: null };
+        if (name === 'office_lead_times') return { data: [
+            { grp: 'Calligraphy Adornment', set_days: 120, pieces: 9, median_days: 113, min_days: 82, max_days: 343, examples: '元亨利贞 · 天至喜 1 · 天道酬勤' },
+            { grp: 'Power Ring', set_days: 180, pieces: 3, median_days: 138, min_days: 101, max_days: 138, examples: 'PR 4 · PR 5' },
+        ], error: null };
         if (name === 'office_notice_apply') {
             for (const p of args.p_picks) { const l = window.__cands.find(x => x.id === p.line_id); if (l) { l.applied_at = '2026-11-11T03:00:00Z'; l.delivery_item_id = p.item_id; l.decision = 'apply'; } }
             T.office_notices[0].status = 'applied';
@@ -173,6 +177,13 @@ async function main() {
         const list = await modalText(page);
         check('notices list: upload box + the sheet with collect date', /Upload the office's photo/.test(list) && /財庫 pls collect on 11 NOV 2026/.test(list) && /11 Nov 2026/.test(list), list.slice(0, 400));
         await shot('2-notices');
+        await page.evaluate(() => { const d = document.getElementById('ofn-lead'); d.open = true; d.dispatchEvent(new Event('toggle')); });
+        await sleep(400);
+        const times = await modalText(page);
+        check('⏱ real times: CRM setting vs real per group', /How long pieces really take/.test(times) && /Calligraphy Adornment/.test(times)
+            && /3\.8 months\s*about right/i.test(times) && /4\.6 months\s*faster than set/i.test(times) && /From 12 pieces/.test(times), times.slice(-700));
+        check('⏱ asked the database once', await page.evaluate(() => window.__calls.filter(c => c[1] === 'office_lead_times').length) >= 1);
+        await shot('2b-times');
         await page.evaluate(() => window.app.openOfficeNotice(900));
         await sleep(400);
         const rev = await modalText(page);
@@ -233,6 +244,14 @@ async function main() {
         check('phone review shows the lines', /MANJUNG/.test(await modalText(phone)));
         await phone.evaluate(() => { [...document.querySelectorAll('#ofn-panel details')].forEach(d => { d.open = true; }); });
         await pshot('6-phone-review');
+        await phone.evaluate(() => window.app.openOfficeNotices());
+        await sleep(300);
+        await phone.evaluate(() => { const d = document.getElementById('ofn-lead'); d.open = true; d.dispatchEvent(new Event('toggle')); });
+        await sleep(400);
+        const w3 = await wide();
+        check('phone ⏱ real times fit the screen', w3.doc <= w3.vw + 1 && /faster than set/i.test(await modalText(phone)), w3);
+        await phone.evaluate(() => document.getElementById('ofn-lead').scrollIntoView());
+        await pshot('6b-phone-times');
         await phone.evaluate(() => window.app.openDeliveryItems('purchase', 1, 77));
         await sleep(500);
         const w2 = await wide();

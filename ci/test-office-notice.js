@@ -299,6 +299,27 @@ const I = (id, item_name, extra = {}) => ({ id, item_name, status: 'pending', of
     ], ['production', { stage: 'office', counts: { office: 1, collected: 0, told: 0 }, office: '2026-11-11', place: 'lvl 20', pending: 2 }, 'told', 'done', 'done']);
     eq('message for several pieces', app._diTellText('Ali', ['上龙柄', '财库']).split('\n')[2], 'Hi Ali, your 上龙柄, 财库 are ready for collection 🎉 When is a good time for you to collect?');
 
+    // ── ⏱ real production times (Phase 3) ──
+    ok('times: empty → says sheets add pieces', /No office sheet matched/.test(app._ofnLeadHtml([])) && /No office sheet matched/.test(app._ofnLeadHtml(null)));
+    const lead = app._ofnLeadHtml([
+        { grp: 'Calligraphy Adornment', set_days: 120, pieces: 9, median_days: 113, min_days: 82, max_days: 343, examples: '天至喜 1 · 天道酬勤' },
+        { grp: 'Power Ring', set_days: 180, pieces: 3, median_days: 138, min_days: 101, max_days: 138, examples: 'PR 4' },
+        { grp: 'Artistic Masterpieces', set_days: 120, pieces: 1, median_days: 197, min_days: 197, max_days: 197, examples: '<b>x</b>' },
+        { grp: 'Other', set_days: null, pieces: 4, median_days: 92, min_days: 87, max_days: 355, examples: '' },
+    ]);
+    const leadRows = lead.split('<tr>').slice(2);
+    ok('times: within 30 days of the setting = about right', /3\.8 months<\/b>.*about right/s.test(leadRows[0]) && /<td[^>]*>4 months<\/td>/.test(leadRows[0]));
+    ok('times: 42 days quicker = faster than set', /4\.6 months<\/b>.*faster than set/s.test(leadRows[1]));
+    ok('times: slower than set, under 3 pieces flagged', /slower than set/.test(leadRows[2]) && /too few to trust/.test(leadRows[2]) && !/too few/.test(leadRows[1]));
+    ok('times: no CRM date → "— no date", no tag', /— no date/.test(leadRows[3]) && !/than set|about right/.test(leadRows[3]));
+    ok('times: range + total pieces', /2\.7 months – 11\.4 months/.test(leadRows[0]) && /From 17 pieces/.test(lead));
+    ok('times: examples escaped', /&lt;b&gt;x&lt;\/b&gt;/.test(lead) && !/<b>x<\/b>/.test(lead));
+    reset();
+    FORM['ofn-lead-body'] = { innerHTML: '', textContent: '' };
+    await app.ofnLeadLoad();
+    ok('times: loads office_lead_times into the panel', rpcCalls.some(c => c[0] === 'office_lead_times') && /No office sheet matched/.test(FORM['ofn-lead-body'].innerHTML));
+    delete FORM['ofn-lead-body'];
+
     console.log(`test-office-notice: ${pass} passed, ${fail} failed`);
     process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });
