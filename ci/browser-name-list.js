@@ -48,8 +48,16 @@ const installFakes = () => {
         focus_names: [], scope: 'mine', status: 'active', target_qty: 3, target_date: '2026-11-30', remarks: null,
         owner_id: 1, owner_name: 'System Admin', mine: true, can_manage: true,
     }, o);
+    // 📦 Waiting to collect mode: live pieces per row (Ben: one at the office + one being made on another order)
+    const WAIT = {
+        102: { pieces: [{ id: 9, purchase_id: 555, customer_id: 77, item: 'SUPPORT POWER RING', ordered: '2026-05-01', ready: '2026-11-01', office: '2026-11-10', place: 'lvl 20', stage: 'at_office' },
+                        { id: 10, purchase_id: 556, customer_id: 77, item: 'WISDOM POWER RING', ordered: '2026-06-01', ready: '2027-01-15', stage: 'making' }] },
+        104: { pieces: [{ id: 11, purchase_id: 557, customer_id: 78, item: 'Calligraphy 元亨利貞', ordered: '2026-08-01', ready: '2027-01-20', stage: 'making' }] },
+        106: { pieces: [], handed_at: '2026-11-11' },
+    };
     const detail = (ver) => ({
-        list: list(window.__nlOwn ? { who: 'owns_1', bought_from: '2026-01-01', bought_to: '2026-06-30', offer: '2nd ring RM1,000 off' } : {}),
+        list: list(window.__nlOwn ? { who: 'owns_1', bought_from: '2026-01-01', bought_to: '2026-06-30', offer: '2nd ring RM1,000 off' }
+            : window.__nlWait ? { who: 'waiting', stage: 'ready', line: 'general', line_label: 'General 一般', goal: 'service' } : {}),
         version: { no: ver || 2, latest: !ver || ver === 2, held: { do_not_invite: 2, paused: 1 }, candidates: 9, offered: 6, picked: 3 },
         versions: [{ no: 2, generated_at: '2026-11-03T10:00:00Z', by: 'System Admin' }, { no: 1, generated_at: '2026-11-01T10:00:00Z', by: 'System Admin' }],
         counts: { picked: 3, contacted: 1, replied: 1, interested: 1, met: 0, closed: 1, revenue: 3800, closed_after_contact: 1 },
@@ -64,7 +72,7 @@ const installFakes = () => {
                   ...(window.__nlRule ? { next_step_rule: window.__nlRule, next_step: window.__nlRule === 'task_due' ? 'Follow up: Step 1 order WA' : 'Arrange a follow-up talk about 汇集' } : {}) }),
             row({ id: 105, name: 'Eve Gone', decision: 'removed', decision_reason: 'not_fit', decision_note: 'moved overseas', decided_by_name: 'System Admin', rank: 5 }),
             row({ id: 106, name: 'Fay Added', customer_id: 77, prospect_id: null, person_key: 'c:77', source: 'manual', added_by_name: 'System Admin', add_note: 'met at dinner', reasons: [], fit: null, reply: 'interested', reply_at: '2026-11-03T03:00:00Z' }),
-        ],
+        ].map(r => (window.__nlWait ? Object.assign(r, WAIT[r.id] || { pieces: [] }) : r)),
     });
     window.__calls = [];
     window.__nl = { index: [
@@ -343,9 +351,9 @@ async function main() {
         console.log('\nWho to include');
         await page.evaluate(() => window.app.nlpNew());
         await page.waitForSelector('#nlp-f-who option', { timeout: 10000 });
-        check('Who to include: 4 choices, best fit first', (await page.evaluate(() => [...document.querySelectorAll('#nlp-f-who option')].map(o => o.value).join(','))) === 'best,owns_1,owns_any,owns_none');
+        check('Who to include: 5 choices, best fit first', (await page.evaluate(() => [...document.querySelectorAll('#nlp-f-who option')].map(o => o.value).join(','))) === 'best,owns_1,owns_any,owns_none,waiting');
         await page.evaluate(() => { document.getElementById('nlp-f-line').value = 'general'; window.app.nlpFormSync(); });
-        check('General line: only best fit (nothing to count)', await page.evaluate(() => [...document.querySelectorAll('#nlp-f-who option')].filter(o => !o.disabled).map(o => o.value).join(',') === 'best'));
+        check('General line: best fit + waiting to collect (nothing to count)', await page.evaluate(() => [...document.querySelectorAll('#nlp-f-who option')].filter(o => !o.disabled).map(o => o.value).join(',') === 'best,waiting'));
         await page.evaluate(() => {
             document.getElementById('nlp-f-line').value = 'ring'; window.app.nlpFormSync();
             document.getElementById('nlp-f-who').value = 'owns_1'; window.app.nlpFormSync();
@@ -390,6 +398,48 @@ async function main() {
         const se = await last('name_list_set');
         check('Edit saves the offer', se && se.args.p.offer === '2nd ring RM800 off', se);
         await page.evaluate(() => { window.__nlOwn = false; window.app.nlpBack(); });
+        await sleep(300);
+
+        console.log('\nWaiting to collect');
+        await page.evaluate(() => window.app.nlpNew());
+        await page.waitForSelector('#nlp-f-who option', { timeout: 10000 });
+        await page.evaluate(() => {
+            document.getElementById('nlp-f-line').value = 'general'; window.app.nlpFormSync();
+            document.getElementById('nlp-f-who').value = 'waiting'; window.app.nlpFormSync();
+        });
+        check('General + Waiting to collect: Stage shown, bought-between hidden', await page.evaluate(() => document.getElementById('nlp-f-who').value === 'waiting'
+            && !document.getElementById('nlp-f-stagewrap').hidden && document.getElementById('nlp-f-window').hidden));
+        await page.evaluate(() => { document.getElementById('nlp-f-stage').value = 'ready'; window.app.nlpFormSync(); });
+        await sleep(900);
+        const wp = await last('name_list_preview');
+        check('live count asks for waiting · ready now', wp && wp.args.p.who === 'waiting' && wp.args.p.stage === 'ready' && wp.args.p.line === 'general', wp);
+        await clickText('#global-modal-overlay button', 'Find the people');
+        await page.waitForFunction(() => !!document.querySelector('.nlp-detail'), { timeout: 15000 });
+        const cwt = await last('name_list_create');
+        check('create payload: waiting + stage', cwt && cwt.args.p.who === 'waiting' && cwt.args.p.stage === 'ready' && cwt.args.p.bought_from === null, cwt);
+        await page.evaluate(() => { window.__nlWait = true; return window.app.nlpOpen(11); });
+        await page.waitForFunction(() => document.querySelector('.nlp-detail')?.innerText.includes('Waiting to collect'), { timeout: 10000 });
+        check('header: 📦 Waiting to collect · ready now', (await text()).includes('📦 Waiting to collect · ready now'), (await text()).slice(0, 300));
+        const ben = await page.evaluate(() => (document.getElementById('nl-row-102')?.textContent || '').replace(/\s+/g, ' '));
+        check('row: each piece and where it is', ben.includes('SUPPORT POWER RING ready at the office since 10 Nov · lvl 20')
+            && ben.includes('WISDOM POWER RING being made · ready around 15 Jan 2027'), ben);
+        check('next step follows the most advanced piece (not the contact progress)', (await nextOf(102)).includes('Collect it from the office'), await nextOf(102));
+        check('still being made → update them with the ready date', (await nextOf(104)).includes('Update them: ready around 20 Jan 2027'), await nextOf(104));
+        check('all handed over → ✅ with the date, no next step', (await page.evaluate(() => document.getElementById('nl-row-106')?.textContent || '')).includes('All handed over · 11 Nov')
+            && (await nextOf(106)) === '');
+        await page.evaluate(() => { window.__diCalls = []; window.app.openDeliveryItems = async (...a) => { window.__diCalls.push(a); }; });
+        await clickText('#nl-row-102 .inv-acts button', '📦 Pieces');
+        await sleep(200);
+        check('📦 Pieces: two orders → pick one first', await page.evaluate(() => document.querySelectorAll('#nl-form-102 button').length === 2 && window.__diCalls.length === 0));
+        await clickText('#nl-form-102 button', 'WISDOM');
+        await sleep(300);
+        check('📦 Pieces opens that order’s items screen, in name-list mode', await page.evaluate(() =>
+            JSON.stringify(window.__diCalls[0]) === JSON.stringify(['purchase', 556, 77, { from: 'namelist' }])), await page.evaluate(() => window.__diCalls));
+        const getsBefore = (await calls('name_list_get')).length;
+        await page.evaluate(() => window.app.nlpPiecesClosed());
+        await sleep(400);
+        check('closing the items screen reloads the list', (await calls('name_list_get')).length === getsBefore + 1);
+        await page.evaluate(() => { window.__nlWait = false; window.app.nlpBack(); });
         await sleep(300);
 
         console.log('\nWho to Focus + Results');

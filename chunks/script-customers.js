@@ -3423,11 +3423,11 @@ const openDeliveryItems = async (kind, id, customerId, opts = {}) => {
             items = await _diFetchItems(kind, id);
         }
         _diCtx = { kind, id, customerId, title: `${info.name}${info.invoice ? ' · ' + info.invoice : ''}`, saleAgentId: info.agentId || null,
-            from: opts && opts.from === 'profile' ? 'profile' : 'list', custName: info.name || '', phone: info.phone || '' };
+            from: opts && (opts.from === 'profile' || opts.from === 'namelist') ? opts.from : 'list', custName: info.name || '', phone: info.phone || '' };
         await _diLoadAdv(items);
         await _diLoadNotices(items);
         UI.showModal('Delivery items', _diRenderItems(items), [
-            _diCtx.from === 'profile'
+            _diCtx.from !== 'list'
                 ? { label: 'Close', type: 'secondary', action: 'app.diClose()' }
                 : { label: '← Back to list', type: 'secondary', action: 'app.openDeliveryListing()' },
         ], 'fullscreen');
@@ -3575,9 +3575,10 @@ const diDeleteItem = async (itemId) => {
 
 // Opened from a profile's DC Closing Record: close and show the new status there.
 const diClose = () => {
-    const fromProfile = _diCtx && _diCtx.from === 'profile';
+    const from = _diCtx && _diCtx.from;
     UI.hideModal();
-    if (fromProfile && typeof window.app.pvRefreshClosing === 'function') window.app.pvRefreshClosing();
+    if (from === 'profile' && typeof window.app.pvRefreshClosing === 'function') window.app.pvRefreshClosing();
+    if (from === 'namelist' && typeof window.app.nlpPiecesClosed === 'function') window.app.nlpPiecesClosed();
 };
 
 const diUndoHandover = async (itemId) => {

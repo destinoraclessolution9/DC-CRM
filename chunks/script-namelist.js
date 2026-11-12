@@ -39,7 +39,9 @@
         other: ['decide', 'introduce', 'upgrade', 'service', 'comeback'],
     };
     // Who to include: the engine's best fits, or everyone by what they bought from the line.
-    const NLP_WHO = [['best', 'Best fit (CRM picks)'], ['owns_1', 'Bought exactly 1'], ['owns_any', 'Bought 1 or more'], ['owns_none', 'Never bought']];
+    const NLP_WHO = [['best', 'Best fit (CRM picks)'], ['owns_1', 'Bought exactly 1'], ['owns_any', 'Bought 1 or more'], ['owns_none', 'Never bought'],
+        ['waiting', '📦 Waiting to collect']];
+    const NLP_STAGES = [['any', 'Any — not collected yet'], ['ready', 'Ready now'], ['making', 'Still being made']];
     // "Not right?" notes — kept to study the suggestions (engine rows: what is wrong; added by hand: why missed).
     const NLP_FB_WRONG = [['owns_more', 'Already owns more than shown'], ['not_interested', 'Not interested / not suitable'],
         ['not_mine', 'Not my customer / wrong agent'], ['bad_record', 'Record is wrong (duplicate, bought for someone else)'],
@@ -60,6 +62,7 @@
         only_events: 'only seen at events', no_notes: 'meetings have no notes', no_phone: 'no phone number',
         no_contact_6m: 'no contact for 6 months', agent_inactive: 'agent left — upline covers', invited_often: 'invited twice this month',
         not_matched_now: 'no longer matches — kept from the last version',
+        check_record: 'check this record — ready date long past or no clear item (handed over already?)',
         'check_first:no_agent': 'check first: no agent', 'check_first:said_not_interested': 'check first: said not interested at CPS',
         'check_first:no_time_3x': 'check first: "no time" 3× in a row', 'check_first:no_show_2x': 'check first: no-show twice',
         'check_first:no_reply_2x': 'check first: no reply twice',
@@ -180,6 +183,7 @@
     const _whoText = (l) => {
         if (!l.who || l.who === 'best') return '';
         const t = (NLP_WHO.find(w => w[0] === l.who) || [null, l.who])[1];
+        if (l.who === 'waiting') return l.stage === 'ready' ? `${t} · ready now` : l.stage === 'making' ? `${t} · still being made` : t;
         return l.bought_from || l.bought_to ? `${t} · bought ${l.bought_from ? _dy(l.bought_from) : '…'} – ${l.bought_to ? _dy(l.bought_to) : 'today'}` : t;
     };
     const _listMeta = (l) => [
@@ -292,6 +296,10 @@
                         <div><label class="nlp-lbl" for="nlp-f-to">Bought to</label>
                             <input type="date" class="form-control" id="nlp-f-to" onchange="app.nlpFormSync()"></div>
                     </div>
+                    <div class="nlp-grid" id="nlp-f-stagewrap" hidden>
+                        <div><label class="nlp-lbl" for="nlp-f-stage">Stage</label>
+                            <select class="form-control" id="nlp-f-stage" onchange="app.nlpFormSync()">${NLP_STAGES.map(([k, l], i) => opt(k, l, i === 0)).join('')}</select></div>
+                    </div>
                     ${_nlp.canTeam ? `
                     <label class="nlp-lbl">Whose people?</label>
                     <div class="nlp-purposes">
@@ -343,24 +351,28 @@
         const ql = document.getElementById('nlp-f-qty-l'); if (ql) ql.textContent = team ? 'How many per agent?' : 'How many people?';
         const q = document.getElementById('nlp-f-qty');
         if (q) { q.max = team ? 50 : 200; if (team && Number(q.value) > 50) q.value = 9; }
-        // Who to include: counting purchases needs a product line; owners → Upgrade, never bought → Decide.
+        // Who to include: counting purchases needs a product line (General = any piece for "waiting");
+        // owners → Upgrade, never bought → Decide, waiting to collect → Service.
         const whoSel = document.getElementById('nlp-f-who');
         if (whoSel) {
             const general = lineSel?.value === 'general';
-            [...whoSel.options].forEach(o => { o.disabled = general && o.value !== 'best'; });
-            if (general) whoSel.value = 'best';
+            [...whoSel.options].forEach(o => { o.disabled = general && o.value !== 'best' && o.value !== 'waiting'; });
+            if (general && whoSel.selectedOptions[0]?.disabled) whoSel.value = 'best';
             const who = whoSel.value;
             const owns = who === 'owns_1' || who === 'owns_any';
             const win = document.getElementById('nlp-f-window'); if (win) win.hidden = !owns;
+            const sw = document.getElementById('nlp-f-stagewrap'); if (sw) sw.hidden = who !== 'waiting';
             if (goalSel && whoSel.dataset.prev !== who && !goalSel.dataset.touched) {
-                const want = owns ? 'upgrade' : who === 'owns_none' ? 'decide' : null;
+                const want = owns ? 'upgrade' : who === 'owns_none' ? 'decide' : who === 'waiting' ? 'service' : null;
                 if (want && [...goalSel.options].some(o => o.value === want)) goalSel.value = want;
             }
             whoSel.dataset.prev = who;
             const note = document.getElementById('nlp-f-note');
             if (note) note.textContent = who === 'best'
                 ? 'The CRM shows about 2.5× as many names as you ask for and ticks the best ones. People who asked not to be contacted are never listed.'
-                : 'Everyone who matches is listed, best first. Counted per item: “A + B” in one sale counts 2; cancelled or refunded sales don’t count. People who asked not to be contacted are never listed.';
+                : who === 'waiting'
+                    ? 'Everyone with a piece not collected yet (General = every product), ready ones first. Each row shows where the piece is now; 📦 Pieces opens it to record the handover.'
+                    : 'Everyone who matches is listed, best first. Counted per item: “A + B” in one sale counts 2; cancelled or refunded sales don’t count. People who asked not to be contacted are never listed.';
         }
         _previewSoon();
     };
@@ -373,6 +385,7 @@
             purpose: _radio('nlp-purpose') || 'promote', line: v('nlp-f-line'), goal: v('nlp-f-goal'),
             focus: focus ? [Number(focus)] : [], scope: _radio('nlp-scope') || 'mine', who,
             bought_from: owns ? v('nlp-f-from') || null : null, bought_to: owns ? v('nlp-f-to') || null : null,
+            stage: who === 'waiting' ? v('nlp-f-stage') || 'any' : null,
         };
     };
     // "N people match" under the form — the same pool the list is made from.
@@ -395,7 +408,7 @@
         const team = p.scope === 'team', n = Number(r.match) || 0, a = Number(r.agents) || 0, h = Number(r.held) || 0;
         box.innerHTML = `<b>${n}</b> ${n === 1 ? 'person matches' : 'people match'}${team ? ` · ${a} agent${a === 1 ? '' : 's'}` : ''}${h ? ` <span class="inv-when">· ${h} held back</span>` : ''}`;
         const q = document.getElementById('nlp-f-qty');
-        if (q && !q.dataset.touched && (p.who === 'owns_1' || p.who === 'owns_any') && n > 0) {
+        if (q && !q.dataset.touched && (p.who === 'owns_1' || p.who === 'owns_any' || p.who === 'waiting') && n > 0) {
             q.value = Math.min(team ? Number(r.per_agent_max) || 1 : n, team ? 50 : 200);
         }
     };
@@ -583,11 +596,43 @@
         if (r.sale_amount != null) bits.push(`<span class="inv-st-ok">💰 Closed ${_rm(r.sale_amount)}</span>${r.sale_item ? ` <span class="inv-when">${esc(String(r.sale_item).slice(0, 40))}</span>` : ''}`);
         return bits.length ? `<div class="nlp-prog">${bits.join(' · ')}</div>` : '';
     };
+    // 📦 Waiting to collect: where each piece is now (read live from the delivery items).
+    const _pieceText = (p) => {
+        switch (p.stage) {
+            case 'told': return `customer told ${_d(p.told)} · not picked up yet`;
+            case 'with_us': return `collected from the office ${_d(p.collected)} · customer not told`;
+            case 'at_office': return `ready at the office since ${_d(p.office)}${p.place ? ' · ' + p.place : ''}`;
+            case 'due': return `ready date ${_d(p.ready)} passed · no word from the office`;
+            case 'making': return `being made · ready around ${_d(p.ready)}`;
+            default: return 'no ready date';
+        }
+    };
+    const _piecesHtml = (r) => {
+        if (!Array.isArray(r.pieces)) return '';
+        if (!r.pieces.length) return `<div class="nlp-pieces"><span class="inv-st-ok">✅ ${r.handed_at ? `All handed over · ${esc(_d(r.handed_at))}` : 'Nothing waiting now'}</span></div>`;
+        return `<div class="nlp-pieces">${r.pieces.slice(0, 2).map(p => `<div>📦 <b>${esc(p.item || '—')}</b> <span class="inv-when">${esc(_pieceText(p))}</span></div>`).join('')}${
+            r.pieces.length > 2 ? `<div class="inv-when">+${r.pieces.length - 2} more piece${r.pieces.length - 2 === 1 ? '' : 's'}</div>` : ''}</div>`;
+    };
+    const _waitStep = (r, l) => {
+        const p = (r.pieces || [])[0];
+        if (!p) return null;
+        const why = l.offer || '';
+        switch (p.stage) {
+            case 'told': return { step: 'Arrange the handover', why: why || `told ${_d(p.told)}` };
+            case 'with_us': return { step: 'Tell them it’s ready', why: why || 'collected from the office' };
+            case 'at_office': return { step: 'Collect it from the office', why: why || p.place || '' };
+            case 'due': return { step: 'Check with the office', why: why || 'ready date passed' };
+            case 'making': return { step: `Update them: ready around ${_d(p.ready)}`, why };
+            default: return { step: 'Check the ready date', why };
+        }
+    };
     // The engine's next step is a snapshot from when the list was made; once the
     // agent has done something the row moves on from it (null = nothing to do).
     const _nextStep = (r, d) => {
-        if (r.decision === 'removed' || r.sale_amount != null || r.dni || r.reply === 'stop') return null;
+        if (r.decision === 'removed' || r.dni || r.reply === 'stop') return null;
         const l = (d && d.list) || {};
+        if (l.who === 'waiting') return _waitStep(r, l);
+        if (r.sale_amount != null) return null;
         const topic = (l.focus_names || []).length === 1 ? l.focus_names[0] : (l.line_label || l.line || '');
         const about = topic ? ` about ${topic}` : '';
         if (r.reply === 'not_interested') return { step: 'Leave it for now', why: 'Said not interested' };
@@ -616,13 +661,15 @@
             r.prefers_call && !r.dni ? '<span class="inv-chip">Prefers a call</span>' : '',
         ].join('');
         let acts = '';
+        const piecesBtn = work && (r.pieces || []).length
+            ? `<button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.nlpPieces(${id})">📦 Pieces</button>` : '';
         if (work) {
             if (r.decision === 'selected') {
                 const contact = r.dni ? '' : (r.prefers_call || !r.phone
                     ? `<button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.nlpStep(${id}, 'called')">📞 Called</button>`
                     : `<button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.nlpWhatsApp(${id})">💬 WhatsApp</button>
                        <button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.nlpStep(${id}, 'called')">📞 Called</button>`);
-                acts = `${contact}
+                acts = `${piecesBtn}${contact}
                     <button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.nlpForm(${id}, 'reply')">Reply…</button>
                     <button type="button" class="btn btn-sm secondary" aria-label="More" onclick="event.stopPropagation();app.nlpForm(${id}, 'more')">⋯</button>`;
             } else if (r.decision === 'pending') {
@@ -642,6 +689,7 @@
                     <div class="inv-name"><a href="javascript:void(0)" onclick="event.stopPropagation();${profile}">${esc(r.name || '—')}</a>${chips}</div>
                     ${r.add_note ? `<ul class="inv-why"><li class="inv-note">“${esc(r.add_note)}”</li></ul>` : ''}
                     ${(r.reasons || []).length ? `<ul class="inv-why">${_reasonsHtml(r)}</ul>` : (r.source === 'manual' ? '' : '<div class="inv-why-none">No reason recorded</div>')}
+                    ${_piecesHtml(r)}
                     ${next ? `<div class="nlp-next">➜ <b>${esc(next.step)}</b>${next.why ? ` <span class="inv-when">${esc(next.why)}</span>` : ''}</div>` : ''}
                     ${warns.length ? `<div class="inv-warn">⚠ ${esc(warns.join(' · '))}</div>` : ''}
                     ${removed}
@@ -731,6 +779,28 @@
             await _refresh();
         } catch (e) { UI.toast.error(_err(e)); }
     };
+    // 📦 Pieces → the delivery items screen (collected / told / handover with photo).
+    // One order opens straight away; pieces on several orders → pick the order.
+    const nlpPieces = async (id, purchaseId = null) => {
+        const r = _row(id);
+        if (!r || !(r.pieces || []).length) return;
+        const orders = [...new Map(r.pieces.filter(p => p.purchase_id).map(p => [Number(p.purchase_id), p])).values()];
+        if (!orders.length) { UI.toast.error('This piece has no order to open — use the delivery board'); return; }
+        if (orders.length > 1 && !purchaseId) {
+            const box = document.getElementById(`nl-form-${Number(id)}`);
+            if (!box) return;
+            box.dataset.kind = 'pieces';
+            box.innerHTML = `<div class="inv-form-in"><div class="inv-sub">Which order?</div><div class="inv-form-btns">${orders.map(p =>
+                `<button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.nlpPieces(${Number(id)}, ${Number(p.purchase_id)})">📦 ${esc(String(p.item || '—').slice(0, 30))}${p.ordered ? ' · ' + esc(_d(p.ordered)) : ''}</button>`).join('')}</div></div>`;
+            return;
+        }
+        const p = orders.find(o => Number(o.purchase_id) === Number(purchaseId)) || orders[0];
+        try { if (!window.app.openDeliveryItems && window._loadChunk) await window._loadChunk('chunks/script-customers.min.js'); } catch (_) { /* checked below */ }
+        if (typeof window.app.openDeliveryItems !== 'function') { UI.toast.error('Could not open the delivery items. Please reload.'); return; }
+        await window.app.openDeliveryItems('purchase', Number(p.purchase_id), Number(p.customer_id || r.customer_id), { from: 'namelist' });
+    };
+    // The items screen closed (opened from 📦 Pieces) → show where the pieces are now.
+    const nlpPiecesClosed = () => { if (_nlp.listId && document.querySelector('.nlp-detail')) _refresh(); };
     const nlpDecide = async (id, decision, reason = null, note = null) => {
         try {
             await _rpc('name_list_decide', { p_row: Number(id), p_decision: decision, p_reason: reason, p_note: note });
@@ -902,7 +972,7 @@
         const d = _nlp.detail;
         if (!d) return;
         const q = (s) => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
-        const head = ['Name', 'Type', 'Agent', 'On the list', 'Fit', 'Engaged', 'Ready', 'Why', 'Next step', 'Contacted', 'Reply', 'Met', 'Closed RM'];
+        const head = ['Name', 'Type', 'Agent', 'On the list', 'Fit', 'Engaged', 'Ready', 'Why', 'Next step', 'Contacted', 'Reply', 'Met', 'Closed RM', 'Pieces waiting'];
         const rows = (d.rows || []).filter(r => !r.dni).map(r => [
             r.name, r.customer_id ? 'Customer' : 'Prospect', r.agent_name || '',
             r.decision === 'selected' ? 'yes' : r.decision === 'removed' ? 'taken off' : 'suggested',
@@ -910,6 +980,7 @@
             (r.reasons || []).map(x => x.t).join('; '), (_nextStep(r, d) || {}).step || '',
             r.contact_at ? `${NLP_STEP_LABEL[r.contact_via] || r.contact_via} ${_ymd(r.contact_at)}` : '',
             r.reply ? (NLP_STEP_LABEL[r.reply] || r.reply) : '', r.met_at || '', r.sale_amount ?? '',
+            (r.pieces || []).map(p => `${p.item} (${_pieceText(p)})`).join('; '),
         ]);
         const csv = '﻿' + [head, ...rows].map(x => x.map(q).join(',')).join('\r\n');
         const a = document.createElement('a');
@@ -1029,6 +1100,7 @@
         nlpTab, nlpFilter, nlpNew, nlpFormSync, nlpCreate, nlpEvents, nlpOpenEvent,
         nlpOpen, nlpBack, nlpVersion, nlpForm, nlpDecide, nlpRemove, nlpStep, nlpStop, nlpWhatsApp, nlpOpenActivity,
         nlpToggleAdd, nlpAddSearch, nlpAdd, nlpSet, nlpRegenerate, nlpEdit, nlpSaveEdit, nlpCsv, nlpFlag, nlpFbCsv,
+        nlpPieces, nlpPiecesClosed,
     });
     console.log('[chunk] script-namelist loaded');
 })();

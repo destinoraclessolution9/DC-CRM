@@ -294,6 +294,14 @@ const items = () => DB.delivery_items.slice().sort((a, b) => a.id - b.id);
     await app.openDeliveryItems('purchase', 1, 77);
     app.diClose();
     eq('listing context: no profile refresh', refreshed, 1);
+    // ── 📦 Pieces from a Name List row (2026-11-12) ──
+    await app.openDeliveryItems('purchase', 1, 77, { from: 'namelist' });
+    const nm = calls.modals[calls.modals.length - 1];
+    eq('from a name list: Close instead of Back to list', [nm.actions[0].label, nm.actions[0].action], ['Close', 'app.diClose()']);
+    let nlBack = 0; appStub.nlpPiecesClosed = () => { nlBack++; };
+    calls.hidden = 0;
+    app.diClose();
+    eq('Close: hides and refreshes the name list (not the closing record)', [calls.hidden, nlBack, refreshed], [1, 1, 1]);
 
     windowStub._appState.cu = { id: 1, role: 'Level 1 Super Admin', full_name: 'Admin' };
     console.log(`test-delivery-items: ${pass} passed, ${fail} failed`);
