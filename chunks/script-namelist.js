@@ -40,7 +40,7 @@
     };
     // Who to include: the engine's best fits, or everyone by what they bought from the line.
     const NLP_WHO = [['best', 'Best fit (CRM picks)'], ['owns_1', 'Bought exactly 1'], ['owns_any', 'Bought 1 or more'], ['owns_none', 'Never bought'],
-        ['waiting', '📦 Waiting to collect']];
+        ['waiting', '📦 Waiting to collect'], ['owed', '🤝 Owed to the agent']];
     const NLP_STAGES = [['any', 'Any — not collected yet'], ['ready', 'Ready now'], ['making', 'Still being made']];
     // "Not right?" notes — kept to study the suggestions (engine rows: what is wrong; added by hand: why missed).
     const NLP_FB_WRONG = [['owns_more', 'Already owns more than shown'], ['not_interested', 'Not interested / not suitable'],
@@ -356,14 +356,14 @@
         const whoSel = document.getElementById('nlp-f-who');
         if (whoSel) {
             const general = lineSel?.value === 'general';
-            [...whoSel.options].forEach(o => { o.disabled = general && o.value !== 'best' && o.value !== 'waiting'; });
+            [...whoSel.options].forEach(o => { o.disabled = general && !['best', 'waiting', 'owed'].includes(o.value); });
             if (general && whoSel.selectedOptions[0]?.disabled) whoSel.value = 'best';
             const who = whoSel.value;
             const owns = who === 'owns_1' || who === 'owns_any';
             const win = document.getElementById('nlp-f-window'); if (win) win.hidden = !owns;
             const sw = document.getElementById('nlp-f-stagewrap'); if (sw) sw.hidden = who !== 'waiting';
             if (goalSel && whoSel.dataset.prev !== who && !goalSel.dataset.touched) {
-                const want = owns ? 'upgrade' : who === 'owns_none' ? 'decide' : who === 'waiting' ? 'service' : null;
+                const want = owns ? 'upgrade' : who === 'owns_none' ? 'decide' : (who === 'waiting' || who === 'owed') ? 'service' : null;
                 if (want && [...goalSel.options].some(o => o.value === want)) goalSel.value = want;
             }
             whoSel.dataset.prev = who;
@@ -372,6 +372,8 @@
                 ? 'The CRM shows about 2.5× as many names as you ask for and ticks the best ones. People who asked not to be contacted are never listed.'
                 : who === 'waiting'
                     ? 'Everyone with a piece not collected yet (General = every product), ready ones first. Each row shows where the piece is now; 📦 Pieces opens it to record the handover.'
+                : who === 'owed'
+                    ? 'Customers handed a piece from an agent’s own stock whose company piece is not back with that agent yet (calligraphy, artistic masterpieces, 财库). The lender ticks ↩ Returned on the row.'
                     : 'Everyone who matches is listed, best first. Counted per item: “A + B” in one sale counts 2; cancelled or refunded sales don’t count. People who asked not to be contacted are never listed.';
         }
         _previewSoon();
@@ -408,7 +410,7 @@
         const team = p.scope === 'team', n = Number(r.match) || 0, a = Number(r.agents) || 0, h = Number(r.held) || 0;
         box.innerHTML = `<b>${n}</b> ${n === 1 ? 'person matches' : 'people match'}${team ? ` · ${a} agent${a === 1 ? '' : 's'}` : ''}${h ? ` <span class="inv-when">· ${h} held back</span>` : ''}`;
         const q = document.getElementById('nlp-f-qty');
-        if (q && !q.dataset.touched && (p.who === 'owns_1' || p.who === 'owns_any' || p.who === 'waiting') && n > 0) {
+        if (q && !q.dataset.touched && ['owns_1', 'owns_any', 'waiting', 'owed'].includes(p.who) && n > 0) {
             q.value = Math.min(team ? Number(r.per_agent_max) || 1 : n, team ? 50 : 200);
         }
     };
@@ -598,6 +600,15 @@
     };
     // 📦 Waiting to collect: where each piece is now (read live from the delivery items).
     const _pieceText = (p) => {
+        if (p.kind === 'owed') {   // 🤝 the customer has a piece from an agent's stock; the company piece goes to that agent
+            const from = `from ${p.lender || 'an agent'}'s stock${p.given ? ' ' + _d(p.given) : ''}`;
+            switch (p.stage) {
+                case 'collected': return `${from} · company piece collected ${_d(p.collected)} — tick ↩ Returned`;
+                case 'at_office': return `${from} · company piece ready at the office since ${_d(p.office)}${p.place ? ' · ' + p.place : ''}`;
+                case 'due': return `${from} · company piece due ${_d(p.back)} — overdue`;
+                default: return `${from} · company piece due ~${_d(p.back)}`;
+            }
+        }
         switch (p.stage) {
             case 'told': return `customer told ${_d(p.told)} · not picked up yet`;
             case 'with_us': return `collected from the office ${_d(p.collected)} · customer not told`;
@@ -607,16 +618,30 @@
             default: return 'no ready date';
         }
     };
-    const _piecesHtml = (r) => {
+    const _piecesHtml = (r, l) => {
         if (!Array.isArray(r.pieces)) return '';
-        if (!r.pieces.length) return `<div class="nlp-pieces"><span class="inv-st-ok">✅ ${r.handed_at ? `All handed over · ${esc(_d(r.handed_at))}` : 'Nothing waiting now'}</span></div>`;
-        return `<div class="nlp-pieces">${r.pieces.slice(0, 2).map(p => `<div>📦 <b>${esc(p.item || '—')}</b> <span class="inv-when">${esc(_pieceText(p))}</span></div>`).join('')}${
+        const owed = l && l.who === 'owed';
+        if (!r.pieces.length) {
+            return `<div class="nlp-pieces"><span class="inv-st-ok">✅ ${owed
+                ? (r.handed_at ? `Company piece back with the agent · ${esc(_d(r.handed_at))}` : 'Nothing owed now')
+                : (r.handed_at ? `All handed over · ${esc(_d(r.handed_at))}` : 'Nothing waiting now')}</span></div>`;
+        }
+        return `<div class="nlp-pieces">${r.pieces.slice(0, 2).map(p => `<div>${p.kind === 'owed' ? '🤝' : '📦'} <b>${esc(p.item || '—')}</b> <span class="inv-when">${esc(_pieceText(p))}</span></div>`).join('')}${
             r.pieces.length > 2 ? `<div class="inv-when">+${r.pieces.length - 2} more piece${r.pieces.length - 2 === 1 ? '' : 's'}</div>` : ''}</div>`;
     };
     const _waitStep = (r, l) => {
         const p = (r.pieces || [])[0];
         if (!p) return null;
         const why = l.offer || '';
+        if (p.kind === 'owed') {
+            const lender = p.lender ? `for ${p.lender}` : '';
+            switch (p.stage) {
+                case 'collected': return { step: 'Tick ↩ Returned', why: `${p.lender || 'the agent'} has the company piece` };
+                case 'at_office': return { step: 'Collect the company piece from the office', why: [lender, p.place].filter(Boolean).join(' · ') };
+                case 'due': return { step: 'Chase the office — company piece overdue', why: lender };
+                default: return { step: `Company piece due ~${_d(p.back)}`, why: lender };
+            }
+        }
         switch (p.stage) {
             case 'told': return { step: 'Arrange the handover', why: why || `told ${_d(p.told)}` };
             case 'with_us': return { step: 'Tell them it’s ready', why: why || 'collected from the office' };
@@ -631,7 +656,7 @@
     const _nextStep = (r, d) => {
         if (r.decision === 'removed' || r.dni || r.reply === 'stop') return null;
         const l = (d && d.list) || {};
-        if (l.who === 'waiting') return _waitStep(r, l);
+        if (l.who === 'waiting' || l.who === 'owed') return _waitStep(r, l);
         if (r.sale_amount != null) return null;
         const topic = (l.focus_names || []).length === 1 ? l.focus_names[0] : (l.line_label || l.line || '');
         const about = topic ? ` about ${topic}` : '';
@@ -661,8 +686,10 @@
             r.prefers_call && !r.dni ? '<span class="inv-chip">Prefers a call</span>' : '',
         ].join('');
         let acts = '';
-        const piecesBtn = work && (r.pieces || []).length
-            ? `<button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.nlpPieces(${id})">📦 Pieces</button>` : '';
+        const piecesBtn = !work || !(r.pieces || []).length ? ''
+            : d.list.who === 'owed'
+                ? `<button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.nlpReturned(${id})">↩ Returned</button>`
+                : `<button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.nlpPieces(${id})">📦 Pieces</button>`;
         if (work) {
             if (r.decision === 'selected') {
                 const contact = r.dni ? '' : (r.prefers_call || !r.phone
@@ -689,7 +716,7 @@
                     <div class="inv-name"><a href="javascript:void(0)" onclick="event.stopPropagation();${profile}">${esc(r.name || '—')}</a>${chips}</div>
                     ${r.add_note ? `<ul class="inv-why"><li class="inv-note">“${esc(r.add_note)}”</li></ul>` : ''}
                     ${(r.reasons || []).length ? `<ul class="inv-why">${_reasonsHtml(r)}</ul>` : (r.source === 'manual' ? '' : '<div class="inv-why-none">No reason recorded</div>')}
-                    ${_piecesHtml(r)}
+                    ${_piecesHtml(r, d.list)}
                     ${next ? `<div class="nlp-next">➜ <b>${esc(next.step)}</b>${next.why ? ` <span class="inv-when">${esc(next.why)}</span>` : ''}</div>` : ''}
                     ${warns.length ? `<div class="inv-warn">⚠ ${esc(warns.join(' · '))}</div>` : ''}
                     ${removed}
@@ -798,6 +825,25 @@
         try { if (!window.app.openDeliveryItems && window._loadChunk) await window._loadChunk('chunks/script-customers.min.js'); } catch (_) { /* checked below */ }
         if (typeof window.app.openDeliveryItems !== 'function') { UI.toast.error('Could not open the delivery items. Please reload.'); return; }
         await window.app.openDeliveryItems('purchase', Number(p.purchase_id), Number(p.customer_id || r.customer_id), { from: 'namelist' });
+    };
+    // ↩ Returned (🤝 Owed to the agent): the lender confirms the company piece is back
+    // (same form as the delivery board's Agent advances; only the lender or admin can save).
+    const nlpReturned = async (id, advId = null) => {
+        const r = _row(id);
+        const owed = ((r && r.pieces) || []).filter(p => p.adv_id);
+        if (!owed.length) return;
+        if (owed.length > 1 && !advId) {
+            const box = document.getElementById(`nl-form-${Number(id)}`);
+            if (!box) return;
+            box.dataset.kind = 'returned';
+            box.innerHTML = `<div class="inv-form-in"><div class="inv-sub">Which piece is back?</div><div class="inv-form-btns">${owed.map(p =>
+                `<button type="button" class="btn btn-sm secondary" onclick="event.stopPropagation();app.nlpReturned(${Number(id)}, ${Number(p.adv_id)})">🤝 ${esc(String(p.item || '—').slice(0, 30))}${p.lender ? ' · ' + esc(p.lender) : ''}</button>`).join('')}</div></div>`;
+            return;
+        }
+        const p = owed.find(o => Number(o.adv_id) === Number(advId)) || owed[0];
+        try { if (!window.app.advReturn && window._loadChunk) await window._loadChunk('chunks/script-customers.min.js'); } catch (_) { /* checked below */ }
+        if (typeof window.app.advReturn !== 'function') { UI.toast.error('Could not open the return form. Please reload.'); return; }
+        window.app.advReturn(Number(p.adv_id), { from: 'namelist' });
     };
     // The items screen closed (opened from 📦 Pieces) → show where the pieces are now.
     const nlpPiecesClosed = () => { if (_nlp.listId && document.querySelector('.nlp-detail')) _refresh(); };
@@ -1100,7 +1146,7 @@
         nlpTab, nlpFilter, nlpNew, nlpFormSync, nlpCreate, nlpEvents, nlpOpenEvent,
         nlpOpen, nlpBack, nlpVersion, nlpForm, nlpDecide, nlpRemove, nlpStep, nlpStop, nlpWhatsApp, nlpOpenActivity,
         nlpToggleAdd, nlpAddSearch, nlpAdd, nlpSet, nlpRegenerate, nlpEdit, nlpSaveEdit, nlpCsv, nlpFlag, nlpFbCsv,
-        nlpPieces, nlpPiecesClosed,
+        nlpPieces, nlpPiecesClosed, nlpReturned,
     });
     console.log('[chunk] script-namelist loaded');
 })();

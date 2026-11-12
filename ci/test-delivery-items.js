@@ -280,6 +280,18 @@ const items = () => DB.delivery_items.slice().sort((a, b) => a.id - b.id);
     calls.toastErr.length = 0;
     await app.advSaveReturn(901);
     eq('return needs a date', calls.toastErr.pop(), 'Date returned is required');
+    // ── ↩ Returned from a Name List row (2026-11-12): back to the list, not the board ──
+    DB.delivery_advances.push({ id: 903, delivery_item_id: 997, customer_id: 77, lender_agent_id: 5, item_name: '福', given_date: '2026-09-01', expected_back: '2026-10-01', status: 'owed', customers: { full_name: 'Tan Ah Kow' } });
+    app.advReturn(903, { from: 'namelist' });
+    eq('from a name list: Cancel just closes', calls.modals[calls.modals.length - 1].actions[0].action, 'UI.hideModal()');
+    let nlBackAdv = 0; appStub.nlpPiecesClosed = () => { nlBackAdv++; };
+    const modalsBefore = calls.modals.length;
+    FORM['adv-ret-date'] = { value: '2026-10-20' };
+    calls.hidden = 0;
+    await app.advSaveReturn(903);
+    eq('saved from a name list: list refreshed, board not opened', [DB.delivery_advances.find(a => a.id === 903).status, nlBackAdv, calls.hidden, calls.modals.length], ['returned', 1, 1, modalsBefore]);
+    app.advReturn(901);
+    eq('from the board: Cancel goes back to the board', calls.modals[calls.modals.length - 1].actions[0].action, 'app.openAgentAdvances()');
     // ── 📦 Mark delivered from a profile's DC Closing Record (2026-10-27) ──
     reset();
     await app.openDeliveryItems('purchase', 1, 77);

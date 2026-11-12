@@ -55,9 +55,20 @@ const installFakes = () => {
         104: { pieces: [{ id: 11, purchase_id: 557, customer_id: 78, item: 'Calligraphy 元亨利貞', ordered: '2026-08-01', ready: '2027-01-20', stage: 'making' }] },
         106: { pieces: [], handed_at: '2026-11-11' },
     };
+    // 🤝 Owed to the agent mode: Ben's pieces lent from Agent Lau's stock (one at the office, one overdue)
+    const OWED = {
+        102: { pieces: [{ kind: 'owed', adv_id: 701, id: 21, purchase_id: 555, customer_id: 77, item: 'Calligraphy 元亨利貞', lender: 'Agent Lau',
+                          given: '2026-09-01', back: '2026-12-01', office: '2026-11-10', place: 'lvl 20', stage: 'at_office' },
+                        { kind: 'owed', adv_id: 702, id: 22, purchase_id: 556, customer_id: 77, item: '财库 Royal', lender: 'Agent Lau',
+                          given: '2026-08-01', back: '2026-10-01', stage: 'due' }] },
+        104: { pieces: [{ kind: 'owed', adv_id: 703, id: 23, purchase_id: 557, customer_id: 78, item: '画作 山水', lender: 'Agent Kim',
+                          given: '2026-10-01', back: '2027-02-01', stage: 'waiting' }] },
+        106: { pieces: [], handed_at: '2026-11-11' },
+    };
     const detail = (ver) => ({
         list: list(window.__nlOwn ? { who: 'owns_1', bought_from: '2026-01-01', bought_to: '2026-06-30', offer: '2nd ring RM1,000 off' }
-            : window.__nlWait ? { who: 'waiting', stage: 'ready', line: 'general', line_label: 'General 一般', goal: 'service' } : {}),
+            : window.__nlWait ? { who: 'waiting', stage: 'ready', line: 'general', line_label: 'General 一般', goal: 'service' }
+            : window.__nlOwed ? { who: 'owed', line: 'general', line_label: 'General 一般', goal: 'service' } : {}),
         version: { no: ver || 2, latest: !ver || ver === 2, held: { do_not_invite: 2, paused: 1 }, candidates: 9, offered: 6, picked: 3 },
         versions: [{ no: 2, generated_at: '2026-11-03T10:00:00Z', by: 'System Admin' }, { no: 1, generated_at: '2026-11-01T10:00:00Z', by: 'System Admin' }],
         counts: { picked: 3, contacted: 1, replied: 1, interested: 1, met: 0, closed: 1, revenue: 3800, closed_after_contact: 1 },
@@ -72,7 +83,7 @@ const installFakes = () => {
                   ...(window.__nlRule ? { next_step_rule: window.__nlRule, next_step: window.__nlRule === 'task_due' ? 'Follow up: Step 1 order WA' : 'Arrange a follow-up talk about 汇集' } : {}) }),
             row({ id: 105, name: 'Eve Gone', decision: 'removed', decision_reason: 'not_fit', decision_note: 'moved overseas', decided_by_name: 'System Admin', rank: 5 }),
             row({ id: 106, name: 'Fay Added', customer_id: 77, prospect_id: null, person_key: 'c:77', source: 'manual', added_by_name: 'System Admin', add_note: 'met at dinner', reasons: [], fit: null, reply: 'interested', reply_at: '2026-11-03T03:00:00Z' }),
-        ].map(r => (window.__nlWait ? Object.assign(r, WAIT[r.id] || { pieces: [] }) : r)),
+        ].map(r => (window.__nlWait ? Object.assign(r, WAIT[r.id] || { pieces: [] }) : window.__nlOwed ? Object.assign(r, OWED[r.id] || { pieces: [] }) : r)),
     });
     window.__calls = [];
     window.__nl = { index: [
@@ -351,11 +362,11 @@ async function main() {
         console.log('\nWho to include');
         await page.evaluate(() => window.app.nlpNew());
         await page.waitForSelector('#nlp-f-who option', { timeout: 10000 });
-        check('Who to include: 5 choices, best fit first', (await page.evaluate(() => [...document.querySelectorAll('#nlp-f-who option')].map(o => o.value).join(','))) === 'best,owns_1,owns_any,owns_none,waiting');
+        check('Who to include: 6 choices, best fit first', (await page.evaluate(() => [...document.querySelectorAll('#nlp-f-who option')].map(o => o.value).join(','))) === 'best,owns_1,owns_any,owns_none,waiting,owed');
         const shown = (id) => page.evaluate((i) => { const e = document.getElementById(i); return !!e && getComputedStyle(e).display !== 'none'; }, id);
         check('Best fit: no "bought between", no Stage on screen', !(await shown('nlp-f-window')) && !(await shown('nlp-f-stagewrap')));
         await page.evaluate(() => { document.getElementById('nlp-f-line').value = 'general'; window.app.nlpFormSync(); });
-        check('General line: best fit + waiting to collect (nothing to count)', await page.evaluate(() => [...document.querySelectorAll('#nlp-f-who option')].filter(o => !o.disabled).map(o => o.value).join(',') === 'best,waiting'));
+        check('General line: best fit + waiting to collect + owed to the agent (nothing to count)', await page.evaluate(() => [...document.querySelectorAll('#nlp-f-who option')].filter(o => !o.disabled).map(o => o.value).join(',') === 'best,waiting,owed'));
         await page.evaluate(() => {
             document.getElementById('nlp-f-line').value = 'ring'; window.app.nlpFormSync();
             document.getElementById('nlp-f-who').value = 'owns_1'; window.app.nlpFormSync();
@@ -443,6 +454,42 @@ async function main() {
         await sleep(400);
         check('closing the items screen reloads the list', (await calls('name_list_get')).length === getsBefore + 1);
         await page.evaluate(() => { window.__nlWait = false; window.app.nlpBack(); });
+        await sleep(300);
+
+        console.log('\nOwed to the agent');
+        await page.evaluate(() => window.app.nlpNew());
+        await page.waitForSelector('#nlp-f-who option', { timeout: 10000 });
+        await page.evaluate(() => {
+            document.getElementById('nlp-f-line').value = 'general'; window.app.nlpFormSync();
+            document.getElementById('nlp-f-who').value = 'owed'; window.app.nlpFormSync();
+        });
+        check('Owed to the agent: no Stage, no "bought between"', !(await shown('nlp-f-stagewrap')) && !(await shown('nlp-f-window'))
+            && (await page.evaluate(() => document.getElementById('nlp-f-note').innerText)).includes('own stock'));
+        await sleep(900);
+        const op = await last('name_list_preview');
+        check('live count asks for owed (no stage)', op && op.args.p.who === 'owed' && op.args.p.stage === null && op.args.p.line === 'general', op);
+        await clickText('#global-modal-overlay button', 'Cancel');
+        await page.evaluate(() => { window.__nlOwed = true; return window.app.nlpOpen(11); });
+        await page.waitForFunction(() => document.querySelector('.nlp-detail')?.innerText.includes('Owed to the agent'), { timeout: 10000 });
+        const benO = await page.evaluate(() => (document.getElementById('nl-row-102')?.textContent || '').replace(/\s+/g, ' '));
+        check('owed row: piece, lender, where the company piece is', benO.includes("🤝 Calligraphy 元亨利貞 from Agent Lau's stock 1 Sep · company piece ready at the office since 10 Nov · lvl 20")
+            && benO.includes('company piece due 1 Oct — overdue'), benO);
+        check('owed next step: collect the company piece', (await nextOf(102)).includes('Collect the company piece from the office') && (await nextOf(102)).includes('for Agent Lau'), await nextOf(102));
+        check('owed, not due yet: due date shown', (await nextOf(104)).includes('Company piece due ~1 Feb 2027'), await nextOf(104));
+        check('owed, back: ✅ with the date', (await page.evaluate(() => document.getElementById('nl-row-106')?.textContent || '')).includes('Company piece back with the agent · 11 Nov'));
+        await page.evaluate(() => { window.__advCalls = []; window.app.advReturn = (...a) => { window.__advCalls.push(a); }; });
+        check('owed rows: ↩ Returned instead of 📦 Pieces', await page.evaluate(() => {
+            const b = [...document.querySelectorAll('#nl-row-102 .inv-acts button')].map(x => x.textContent.trim());
+            return b.includes('↩ Returned') && !b.includes('📦 Pieces');
+        }));
+        await clickText('#nl-row-102 .inv-acts button', '↩ Returned');
+        await sleep(200);
+        check('↩ Returned: two pieces → pick one first', await page.evaluate(() => document.querySelectorAll('#nl-form-102 button').length === 2 && window.__advCalls.length === 0));
+        await clickText('#nl-form-102 button', '财库');
+        await sleep(300);
+        check('↩ Returned opens the return form for that advance, in name-list mode', await page.evaluate(() =>
+            JSON.stringify(window.__advCalls[0]) === JSON.stringify([702, { from: 'namelist' }])), await page.evaluate(() => window.__advCalls));
+        await page.evaluate(() => { window.__nlOwed = false; window.app.nlpBack(); });
         await sleep(300);
 
         console.log('\nWho to Focus + Results');

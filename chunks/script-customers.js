@@ -3836,13 +3836,16 @@ const openAgentAdvances = async (tab) => {
     (window.app.applyMobileTableLabels || (() => {}))();
 };
 
-const advReturn = (advId) => {
+// opts.from 'namelist' (↩ Returned on a Name List row): Cancel / save go back to the list, not the board.
+let _advFrom = null;
+const advReturn = (advId, opts = {}) => {
+    _advFrom = opts && opts.from === 'namelist' ? 'namelist' : null;
     UI.showModal('↩ Office piece returned to me', `
         <div class="form-group"><label>Date returned</label><input type="date" id="adv-ret-date" class="form-control" value="${_custLocalDay()}" max="${_custLocalDay()}"></div>
         <div class="form-group"><label>Photo <span style="font-weight:400;color:var(--gray-500);font-size:12px;">(optional)</span></label><input type="file" id="adv-ret-photos" class="form-control" accept="image/*" multiple></div>
         <div class="form-group"><label>Note</label><input type="text" id="adv-ret-note" class="form-control" placeholder="e.g. collected at office"></div>
         <div id="adv-ret-status" style="font-size:12px;color:var(--primary);"></div>`,
-        [{ label: 'Cancel', type: 'secondary', action: 'app.openAgentAdvances()' },
+        [{ label: 'Cancel', type: 'secondary', action: _advFrom ? 'UI.hideModal()' : 'app.openAgentAdvances()' },
          { label: 'Confirm returned', type: 'primary', action: `(async () => { await app.advSaveReturn(${Number(advId)}); })()` }]);
 };
 const advSaveReturn = async (advId) => {
@@ -3877,6 +3880,12 @@ const advSaveReturn = async (advId) => {
         if (uploaded.length) { try { await sb.storage.from('attachments').remove(uploaded); } catch (_) { /* best-effort */ } }
         if (status) status.textContent = '';
         return UI.toast.error('Not saved: ' + (e?.message || e));
+    }
+    if (_advFrom === 'namelist') {
+        _advFrom = null;
+        UI.hideModal();
+        if (typeof window.app.nlpPiecesClosed === 'function') window.app.nlpPiecesClosed();
+        return;
     }
     await openAgentAdvances();
 };
