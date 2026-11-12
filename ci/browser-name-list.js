@@ -352,13 +352,16 @@ async function main() {
         await page.evaluate(() => window.app.nlpNew());
         await page.waitForSelector('#nlp-f-who option', { timeout: 10000 });
         check('Who to include: 5 choices, best fit first', (await page.evaluate(() => [...document.querySelectorAll('#nlp-f-who option')].map(o => o.value).join(','))) === 'best,owns_1,owns_any,owns_none,waiting');
+        const shown = (id) => page.evaluate((i) => { const e = document.getElementById(i); return !!e && getComputedStyle(e).display !== 'none'; }, id);
+        check('Best fit: no "bought between", no Stage on screen', !(await shown('nlp-f-window')) && !(await shown('nlp-f-stagewrap')));
         await page.evaluate(() => { document.getElementById('nlp-f-line').value = 'general'; window.app.nlpFormSync(); });
         check('General line: best fit + waiting to collect (nothing to count)', await page.evaluate(() => [...document.querySelectorAll('#nlp-f-who option')].filter(o => !o.disabled).map(o => o.value).join(',') === 'best,waiting'));
         await page.evaluate(() => {
             document.getElementById('nlp-f-line').value = 'ring'; window.app.nlpFormSync();
             document.getElementById('nlp-f-who').value = 'owns_1'; window.app.nlpFormSync();
         });
-        check('Bought exactly 1 → Upgrade goal + "bought between" shown', await page.evaluate(() => document.getElementById('nlp-f-goal').value === 'upgrade' && !document.getElementById('nlp-f-window').hidden));
+        check('Bought exactly 1 → Upgrade goal + "bought between" on screen, no Stage', await page.evaluate(() => document.getElementById('nlp-f-goal').value === 'upgrade')
+            && await shown('nlp-f-window') && !(await shown('nlp-f-stagewrap')));
         await page.waitForFunction(() => document.getElementById('nlp-f-match')?.innerText.includes('58'), { timeout: 5000 });
         const pv = await last('name_list_preview');
         check('live count: asks for the rule, shows "58 people match"', pv && pv.args.p.who === 'owns_1' && pv.args.p.line === 'ring' && pv.args.p.goal === 'upgrade'
@@ -407,8 +410,8 @@ async function main() {
             document.getElementById('nlp-f-line').value = 'general'; window.app.nlpFormSync();
             document.getElementById('nlp-f-who').value = 'waiting'; window.app.nlpFormSync();
         });
-        check('General + Waiting to collect: Stage shown, bought-between hidden', await page.evaluate(() => document.getElementById('nlp-f-who').value === 'waiting'
-            && !document.getElementById('nlp-f-stagewrap').hidden && document.getElementById('nlp-f-window').hidden));
+        check('General + Waiting to collect: Stage on screen, no "bought between"', await page.evaluate(() => document.getElementById('nlp-f-who').value === 'waiting')
+            && await shown('nlp-f-stagewrap') && !(await shown('nlp-f-window')));
         await page.evaluate(() => { document.getElementById('nlp-f-stage').value = 'ready'; window.app.nlpFormSync(); });
         await sleep(900);
         const wp = await last('name_list_preview');

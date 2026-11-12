@@ -12415,6 +12415,7 @@ button.pv-card:focus-visible { outline: 2px solid var(--accent, #E84393); outlin
 .nlp-acc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .nlp-note { font-size: 13px; padding: 8px 0; border-top: 1px solid var(--gray-200); }
 .nlp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.nlp-form [hidden] { display: none !important; }   /* "Bought between" / "Stage" rows: display:grid must not beat [hidden] */
 .nlp-purposes { display: flex; gap: 6px 14px; flex-wrap: wrap; }
 .nlp-radio { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; cursor: pointer; }
 .nlp-table-wrap { overflow-x: auto; border: 1px solid var(--gray-200); border-radius: 8px; }
