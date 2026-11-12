@@ -43,7 +43,15 @@ const reset = () => {
         ] }],
     };
 };
-const match = (r, filters) => filters.every(([op, c, v]) => op === 'eq' ? String(r[c]) === String(v) : v.map(String).includes(String(r[c])));
+const match = (r, filters) => filters.every(([op, c, v]) => op === 'eq' ? String(r[c]) === String(v)
+    : op === 'is' ? (r[c] ?? null) === v : v.map(String).includes(String(r[c])));
+// 📦 My stock (2026-11-12): what the stock RPCs answer
+let STOCK_COUNTS = {}, STOCK_ROWS = [], rpcCalls = [];
+const STOCK_PRODUCTS = [
+    { id: 41, name: '元极大通 Yuan Ji Da Tong', subcategory: 'Calligraphy Adornment' },
+    { id: 42, name: '大满福 Da Man Fu', subcategory: 'Calligraphy Adornment' },
+    { id: 51, name: '财库 Cai Ku', subcategory: 'Royal Woodwork Series' },
+];
 const sb = {
     from: (t) => {
         const filters = [];
@@ -73,6 +81,7 @@ const sb = {
             select: (_c, o) => { if (o && o.head) mode = 'count'; return q; }, order: () => q, limit: () => q,
             eq: (c, v) => { filters.push(['eq', c, v]); return q; },
             in: (c, v) => { filters.push(['in', c, v]); return q; },
+            is: (c, v) => { filters.push(['is', c, v]); return q; },
             insert: (p) => { mode = 'insert'; payload = p; return q; },
             update: (p) => { mode = 'update'; payload = p; return q; },
             delete: () => { mode = 'delete'; return q; },
@@ -81,6 +90,10 @@ const sb = {
         return q;
     },
     rpc: async (fn, args) => {
+        rpcCalls.push([fn, args]);
+        if (fn === 'agent_stock_counts') return { data: STOCK_COUNTS[args.p_item] || [], error: null };
+        if (fn === 'agent_stock_products') return { data: STOCK_PRODUCTS, error: null };
+        if (fn === 'agent_stock_balance') return { data: STOCK_ROWS.filter(r => args.p_agent == null || r.agent_id === args.p_agent), error: null };
         // mirrors delivery_advance_allowed: calligraphy / artistic / 财库·财托, never rings
         if (fn === 'delivery_advance_eligible') return { data: (DB.delivery_items || []).filter(r => args.p_item_ids.includes(r.id) && /(元极大通|大满福|上龙柄|财库|calligraph)/i.test(r.item_name) && !/(ring|指环|\bpr\s?\d)/i.test(r.item_name)).map(r => r.id), error: null };
         return { data: [], error: null };
@@ -101,7 +114,7 @@ const documentStub = {
     createElement: () => ({ style: {}, appendChild() {} }),
 };
 
-const calls = { toastErr: [], toastOk: [], modals: [], statusSet: [] };
+const calls = { toastErr: [], toastOk: [], toastWarn: [], modals: [], statusSet: [] };
 const AppDataStore = {
     getById: async (t, id) => { const r = (DB[t] || []).find(x => String(x.id) === String(id)); return r ? { ...r } : null; },
     getByIdFull: async (t, id) => { const r = (DB[t] || []).find(x => String(x.id) === String(id)); return r ? { ...r } : null; },
@@ -110,7 +123,7 @@ const AppDataStore = {
 };
 const UI = {
     showModal: (title, content, actions) => calls.modals.push({ title, content, actions }), hideModal: () => { calls.hidden = (calls.hidden || 0) + 1; },
-    toast: { success: (m) => calls.toastOk.push(m), error: (m) => calls.toastErr.push(m), info: () => {} },
+    toast: { success: (m) => calls.toastOk.push(m), error: (m) => calls.toastErr.push(m), info: () => {}, warning: (m) => calls.toastWarn.push(m) },
     escJsAttr: (s) => String(s), currencyForCountry: () => 'MYR', countryByCode: () => ({ code: 'MY', symbol: 'RM' }),
 };
 const escapeHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -219,7 +232,9 @@ const items = () => DB.delivery_items.slice().sort((a, b) => a.id - b.id);
     let m = calls.modals[calls.modals.length - 1].content;
     eq('handover form offers "Given from" when an item can be lent', m.includes('id="di-source"'), true);
     eq('lender defaults to the sale agent', /<option value="6" selected>Agent Kim/.test(m), true);
-    eq('lender list = staff L3–12 (no admin)', m.includes('>Admin<'), false);
+    eq('lender list includes the owner / Level 1–2 (2026-11-12)', m.includes('<option value="1" >Admin (0 in hand)</option>'), true);
+    eq('one lendable piece: every name shows its count (admin: missing = 0)', [m.includes('>Agent Lau (0 in hand)<'), m.includes('Agent Kim (0 in hand)<')], [true, true]);
+    eq('counts asked once for the lendable piece only', rpcCalls.filter(c => c[0] === 'agent_stock_counts').map(c => c[1].p_item).slice(-1), ['元极大通']);
     // a ring ticked with agent's stock → refused, nothing saved
     calls.toastErr.length = 0; uploads.length = 0;
     PICKED = [cal, ring]; FORM = { 'di-date': { value: '2026-10-15' }, 'di-how': { value: 'delivered' }, 'di-photos': { files: [photo('c.jpg')] }, 'di-remark': { value: '' }, 'di-source': { value: 'agent' }, 'di-lender': { value: '5' } };
@@ -232,6 +247,7 @@ const items = () => DB.delivery_items.slice().sort((a, b) => a.id - b.id);
     eq('calligraphy handed over', items().find(r => r.id === cal).status, 'delivered');
     eq('advance recorded for that item, lender + date', (DB.delivery_advances || []).map(a => [a.delivery_item_id, a.lender_agent_id, a.given_date]), [[cal, 5, '2026-10-15']]);
     eq('toast mentions the advance', /from agent's stock/.test(calls.toastOk[calls.toastOk.length - 1] || ''), true);
+    eq("lent with 0 in Lau's list → warning to add it", calls.toastWarn.pop(), "Not in Agent Lau's stock list — add it in 🤝 Agent stock → 📦 My stock");
     // office stock → no advance
     PICKED = [ring]; FORM['di-source'] = { value: 'office' };
     await app.diHandover();
@@ -292,6 +308,168 @@ const items = () => DB.delivery_items.slice().sort((a, b) => a.id - b.id);
     eq('saved from a name list: list refreshed, board not opened', [DB.delivery_advances.find(a => a.id === 903).status, nlBackAdv, calls.hidden, calls.modals.length], ['returned', 1, 1, modalsBefore]);
     app.advReturn(901);
     eq('from the board: Cancel goes back to the board', calls.modals[calls.modals.length - 1].actions[0].action, 'app.openAgentAdvances()');
+    // ── 📦 My stock (2026-11-12) ──
+    const LAU = { id: 5, role: 'Level 9 Consultant', full_name: 'Agent Lau' };
+    const ADMIN = { id: 1, role: 'Level 1 Super Admin', full_name: 'Admin' };
+    // handover form counts, as an agent: own missing = 0, others only when known
+    reset();
+    DB.purchases[0].item = '元极大通 + 六曜指环 Support Power Ring';
+    DB.purchases[0].agent_id = 5;
+    windowStub._appState.cu = LAU;
+    STOCK_COUNTS = { '元极大通': [{ agent_id: 6, in_hand: 3 }] };
+    await app.openDeliveryItems('purchase', 1, 77);
+    await app.diSplitItem(items()[0].id);
+    const [cal2] = items().map(r => r.id);
+    await app.openDeliveryItems('purchase', 1, 77);
+    m = calls.modals[calls.modals.length - 1].content;
+    eq('agent view: own 0, team count shown, unknown left blank', [m.includes('>Agent Lau (0 in hand)<'), m.includes('>Agent Kim (3 in hand)<'), m.includes('>Admin<')], [true, true, true]);
+    // from Kim's stock (3 in hand) → no warning
+    calls.toastWarn.length = 0;
+    PICKED = [cal2]; FORM = { 'di-date': { value: '2026-11-10' }, 'di-how': { value: 'delivered' }, 'di-photos': { files: [photo('k.jpg')] }, 'di-remark': { value: '' }, 'di-source': { value: 'agent' }, 'di-lender': { value: '6' } };
+    await app.diHandover();
+    eq('lent from a list that has it → no warning', [DB.delivery_advances.length, calls.toastWarn.length], [1, 0]);
+    // unknown count (admin's, seen by an agent) → no warning either
+    DB.delivery_advances = [];
+    await app.openDeliveryItems('purchase', 1, 77);
+    m = calls.modals[calls.modals.length - 1].content;
+    eq("the handed-over piece offers 🤝 Agent's stock again", m.includes(`app.diMarkAdvance(${cal2})`), true);
+    await app.diMarkAdvance(cal2);
+    m = calls.modals[calls.modals.length - 1].content;
+    eq('earlier-advance form shows counts too', m.includes('>Agent Kim (3 in hand)<'), true);
+    FORM = { 'adv-lender': { value: '1' }, 'adv-date': { value: '2026-11-10' } };
+    await app.diSaveAdvance(cal2, 'purchase', 1, 77);
+    eq('unknown count (someone outside my team) → no warning', [DB.delivery_advances.length, calls.toastWarn.length], [1, 0]);
+    DB.delivery_advances = [];
+    await app.openDeliveryItems('purchase', 1, 77);
+    await app.diMarkAdvance(cal2);
+    FORM = { 'adv-lender': { value: '5' }, 'adv-date': { value: '2026-11-10' } };
+    await app.diSaveAdvance(cal2, 'purchase', 1, 77);
+    eq('my own 0 → warning', calls.toastWarn.pop(), "Not in Agent Lau's stock list — add it in 🤝 Agent stock → 📦 My stock");
+    // two lendable pieces (two products) → names only
+    reset();
+    DB.purchases[0].item = '元极大通 + 大满福';
+    await app.openDeliveryItems('purchase', 1, 77);
+    await app.diSplitItem(items()[0].id);
+    await app.openDeliveryItems('purchase', 1, 77);
+    m = calls.modals[calls.modals.length - 1].content;
+    eq('two lendable pieces → no counts in the list', [m.includes('id="di-source"'), m.includes('in hand)')], [true, false]);
+
+    // board: 📦 My stock tab, as the agent
+    STOCK_ROWS = [
+        { agent_id: 5, product_id: 41, item_name: '元极大通 Yuan Ji Da Tong', subcategory: 'Calligraphy Adornment', in_hand: 2, lent_out: 1, owned: 3, next_back: '2027-02-01', last_date: '2026-11-10', last_kind: 'lent', last_qty: -1 },
+        { agent_id: 5, product_id: null, item_name: '宝王象', subcategory: null, in_hand: -1, lent_out: 1, owned: 0, next_back: null, last_date: '2026-11-11', last_kind: 'lent', last_qty: -1 },
+        { agent_id: 5, product_id: 51, item_name: '财库 Cai Ku', subcategory: 'Royal Woodwork Series', in_hand: 0, lent_out: 0, owned: 0, next_back: null, last_date: '2026-11-01', last_kind: 'adjust', last_qty: -1 },
+    ];
+    DB.delivery_advances = [];
+    windowStub._appState.cu = LAU;
+    await app.openAgentAdvances('stock');
+    let bm = calls.modals[calls.modals.length - 1];
+    m = bm.content;
+    eq('board title + My stock tab first and active', [bm.title, m.includes(`btn-sm primary" onclick="app.openAgentAdvances('stock')">📦 My stock</button>`), m.indexOf("openAgentAdvances('stock')") < m.indexOf("openAgentAdvances('owed')")], ['🤝 Agent stock', true, true]);
+    eq('agent: own rows only → no Agent column, no Everyone filter', [m.includes('<th scope="col">Agent</th>'), m.includes('Everyone')], [false, false]);
+    eq('in hand 2 bold; lent 1 owed back ~date', [m.includes('<td data-label="In hand"><strong>2</strong>'), m.includes('owed back ~1 Feb 2027')], [true, true]);
+    eq('below zero: red with "not entered", item not in the product list', [m.includes('>−1</strong>'), m.includes('not entered — ➕ add it'), m.includes('not in the product list')], [true, true, true]);
+    eq('last change: date · kind · qty', m.includes('10 Nov 2026 · 🤝 Given to a customer −1'), true);
+    eq('Take out only where something is in hand', [m.includes("app.advStockTakeOut(5, 41, '元极大通 Yuan Ji Da Tong')"), m.includes('app.advStockTakeOut(5, null'), m.includes('app.advStockTakeOut(5, 51')], [true, false, false]);
+    eq('➕ and History on every own row', [m.includes("app.advStockAdd(5, null, '宝王象')"), m.includes("app.advStockHistory(5, 51, '财库 Cai Ku')")], [true, true]);
+    eq('stock footnote', m.includes('goes down by itself'), true);
+    eq('RPC asked for everyone visible (no admin filter)', rpcCalls.filter(c => c[0] === 'agent_stock_balance').pop()[1], { p_agent: null });
+    // upline sees a team member's row: Agent column, no edit buttons on it
+    STOCK_ROWS.push({ agent_id: 6, product_id: 42, item_name: '大满福 Da Man Fu', subcategory: 'Calligraphy Adornment', in_hand: 1, lent_out: 0, owned: 1, next_back: null, last_date: '2026-11-05', last_kind: 'added', last_qty: 1 });
+    await app.openAgentAdvances('stock');
+    m = calls.modals[calls.modals.length - 1].content;
+    eq("team row: Agent column; History only on someone else's row", [m.includes('<th scope="col">Agent</th>'), m.includes('>Agent Kim</strong>'), m.includes('app.advStockAdd(6,'), m.includes('app.advStockTakeOut(6,'), m.includes('app.advStockHistory(6, 42')], [true, true, false, false, true]);
+    // empty
+    const keepRows = STOCK_ROWS; STOCK_ROWS = [];
+    await app.openAgentAdvances('stock');
+    eq('empty: how to start', calls.modals[calls.modals.length - 1].content.includes('No stock entered yet'), true);
+    STOCK_ROWS = keepRows;
+
+    // ➕ Add stock as the agent
+    await app.advStockAdd();
+    m = calls.modals[calls.modals.length - 1].content;
+    eq('add form: product groups, own name, no agent picker', [m.includes('<optgroup label="Calligraphy">'), m.includes('<optgroup label="财库 / 财托">'), m.includes('id="adv-st-agent"'), m.includes('>Agent Lau</div>')], [true, true, false, true]);
+    const addForm = (o) => { FORM = { 'adv-st-product': { value: '41' }, 'adv-st-qty': { value: '2' }, 'adv-st-date': { value: '2026-11-01' }, 'adv-st-note': { value: '' }, ...o }; };
+    const tryAdd = async (o) => { calls.toastErr.length = 0; addForm(o); await app.advStockSave(); return calls.toastErr.pop(); };
+    DB.agent_stock_moves = [];
+    eq('add: product required', await tryAdd({ 'adv-st-product': { value: '' } }), 'Pick the product');
+    eq('add: 0 refused', await tryAdd({ 'adv-st-qty': { value: '0' } }), 'How many: a whole number from 1 to 999');
+    eq('add: 1.5 refused', await tryAdd({ 'adv-st-qty': { value: '1.5' } }), 'How many: a whole number from 1 to 999');
+    eq('add: 1000 refused', await tryAdd({ 'adv-st-qty': { value: '1000' } }), 'How many: a whole number from 1 to 999');
+    eq('add: date required', await tryAdd({ 'adv-st-date': { value: '' } }), 'Date is required');
+    eq('add: no future date', await tryAdd({ 'adv-st-date': { value: '2999-01-01' } }), 'Date cannot be in the future');
+    eq('nothing saved while refused', DB.agent_stock_moves.length, 0);
+    await tryAdd({ 'adv-st-note': { value: ' 11.11 promo ' } });
+    eq('added: own id, product, name, qty, date, note', DB.agent_stock_moves.map(r => [r.agent_id, r.product_id, r.item_name, r.qty, r.kind, r.move_date, r.note]),
+        [[5, 41, '元极大通 Yuan Ji Da Tong', 2, 'added', '2026-11-01', '11.11 promo']]);
+    eq('added: toast + back on the stock tab', [calls.toastOk.pop(), calls.modals[calls.modals.length - 1].title], ['Added 2 × 元极大通 Yuan Ji Da Tong', '🤝 Agent stock']);
+    // ➕ on a piece that is not in the product list → that name, no product
+    await app.advStockAdd(5, null, '宝王象');
+    m = calls.modals[calls.modals.length - 1].content;
+    eq('add for a name: fixed name, no product list', [m.includes('>宝王象</div>'), m.includes('id="adv-st-product"')], [true, false]);
+    await tryAdd({ 'adv-st-product': { value: '' }, 'adv-st-qty': { value: '1' } });
+    eq('added by name', DB.agent_stock_moves.slice(-1).map(r => [r.product_id, r.item_name, r.qty]), [[null, '宝王象', 1]]);
+    // an agent can't add to someone else's
+    calls.toastErr.length = 0;
+    await app.advStockAdd(6, 42, '大满福 Da Man Fu');
+    eq("agent: not someone else's stock", calls.toastErr.pop(), 'You can only add to your own stock');
+
+    // ➖ Take out
+    await app.openAgentAdvances('stock');
+    app.advStockTakeOut(5, 41, '元极大通 Yuan Ji Da Tong');
+    bm = calls.modals[calls.modals.length - 1];
+    eq('take-out form shows what is in hand', [bm.title, bm.content.includes('· 2 in hand'), bm.content.includes('max="2"')], ['➖ Take out of stock', true, true]);
+    const tryOut = async (o) => { calls.toastErr.length = 0; FORM = { 'adv-out-qty': { value: '1' }, 'adv-out-why': { value: 'Damaged' }, 'adv-out-note': { value: '' }, ...o }; await app.advStockSaveOut(); return calls.toastErr.pop(); };
+    const before = DB.agent_stock_moves.length;
+    eq('take out: more than in hand refused', await tryOut({ 'adv-out-qty': { value: '3' } }), 'Only 2 in hand');
+    eq('take out: Other needs a note', await tryOut({ 'adv-out-why': { value: 'Other' } }), 'Add a note for "Other"');
+    eq('take out: 0 refused', await tryOut({ 'adv-out-qty': { value: '0' } }), 'How many: a whole number, at least 1');
+    eq('nothing saved while refused (take out)', DB.agent_stock_moves.length, before);
+    await tryOut({ 'adv-out-note': { value: 'frame cracked' } });
+    eq('taken out: −1 adjust with the reason', DB.agent_stock_moves.slice(-1).map(r => [r.agent_id, r.product_id, r.qty, r.kind, r.note]), [[5, 41, -1, 'adjust', 'Damaged · frame cracked']]);
+    calls.toastErr.length = 0;
+    app.advStockTakeOut(5, 51, '财库 Cai Ku');
+    eq('nothing in hand → nothing to take out', calls.toastErr.pop(), 'Nothing in hand to take out');
+
+    // History + remove a typed line
+    DB.agent_stock_moves = [
+        { id: 701, agent_id: 5, product_id: 41, item_name: '元极大通 Yuan Ji Da Tong', qty: 3, kind: 'added', move_date: '2026-10-01', created_by: 5 },
+        { id: 702, agent_id: 5, product_id: 41, item_name: '元极大通 Yuan Ji Da Tong', qty: -1, kind: 'lent', move_date: '2026-11-10', note: 'given to Tan Ah Kow', advance_id: 9, created_by: 6 },
+        { id: 703, agent_id: 5, product_id: 41, item_name: '元极大通 Yuan Ji Da Tong', qty: 1, kind: 'added', move_date: '2026-11-11', created_by: 1 },
+        { id: 704, agent_id: 5, product_id: null, item_name: '宝王象', qty: -1, kind: 'lent', move_date: '2026-11-11', created_by: 6 },
+    ];
+    await app.advStockHistory(5, 41, '元极大通 Yuan Ji Da Tong');
+    bm = calls.modals[calls.modals.length - 1];
+    eq('history: that product only', [bm.title, bm.content.includes('宝王象'), (bm.content.match(/<tr>/g) || []).length], ['📦 元极大通 Yuan Ji Da Tong', false, 3 + 1]);
+    eq('history lines: kind, signed qty, note, who', [bm.content.includes('🤝 Given to a customer'), bm.content.includes('>+3<'), bm.content.includes('>−1<'), bm.content.includes('given to Tan Ah Kow'), bm.content.includes('<td data-label="By">Agent Kim</td>')], [true, true, true, true, true]);
+    eq("✕ only on lines I typed (not lent lines, not admin's)", [bm.content.includes('advStockDeleteMove(701,'), bm.content.includes('advStockDeleteMove(702,'), bm.content.includes('advStockDeleteMove(703,')], [true, false, false]);
+    await app.advStockHistory(5, null, '宝王象');
+    eq('history by name for a piece not in the list', (calls.modals[calls.modals.length - 1].content.match(/<tr>/g) || []).length, 1 + 1);
+    await app.advStockDeleteMove(701, 5, 41, '元极大通 Yuan Ji Da Tong');
+    eq('typed line removed, history reopened', [DB.agent_stock_moves.some(r => r.id === 701), calls.toastOk.pop(), calls.modals[calls.modals.length - 1].title], [false, 'Removed', '📦 元极大通 Yuan Ji Da Tong']);
+
+    // admin: Everyone filter, totals, add for an agent
+    windowStub._appState.cu = ADMIN;
+    STOCK_ROWS.push({ agent_id: 6, product_id: 41, item_name: '元极大通 Yuan Ji Da Tong', subcategory: 'Calligraphy Adornment', in_hand: 4, lent_out: 0, owned: 4, next_back: null, last_date: '2026-11-05', last_kind: 'added', last_qty: 4 });
+    await app.openAgentAdvances('stock');
+    m = calls.modals[calls.modals.length - 1].content;
+    eq('admin: Everyone filter + totals per product', [m.includes('<option value="">Everyone</option>'), m.includes('All agents'), m.includes('By agent')], [true, true, true]);
+    eq('admin totals: 元极大通 2 + 4 = 6 in hand, lent 1, 2 agents holding',
+        /<td data-label="Product">元极大通 Yuan Ji Da Tong<\/td><td data-label="In hand"><strong>6<\/strong><\/td>\s*<td data-label="Lent to customers">1<\/td><td data-label="Agents holding">2 agents holding<\/td>/.test(m), true);
+    eq('admin can change every row', [m.includes('app.advStockTakeOut(6, 41'), m.includes('app.advStockAdd(6, 42')], [true, true]);
+    await app.advStockFilter('6');
+    m = calls.modals[calls.modals.length - 1].content;
+    eq('admin filter: one agent, no totals', [rpcCalls.filter(c => c[0] === 'agent_stock_balance').pop()[1].p_agent, m.includes('All agents'), m.includes('<option value="6" selected>Agent Kim</option>')], [6, false, true]);
+    await app.advStockAdd();
+    m = calls.modals[calls.modals.length - 1].content;
+    eq('admin add: whose-stock picker, defaults to the filtered agent', [m.includes('id="adv-st-agent"'), m.includes('<option value="6" selected>Agent Kim</option>')], [true, true]);
+    DB.agent_stock_moves = [];
+    addForm({ 'adv-st-agent': { value: '6' }, 'adv-st-product': { value: '51' }, 'adv-st-qty': { value: '1' } });
+    await app.advStockSave();
+    eq('admin added for Kim', DB.agent_stock_moves.map(r => [r.agent_id, r.product_id, r.item_name]), [[6, 51, '财库 Cai Ku']]);
+    await app.advStockFilter('');
+    STOCK_ROWS = [];
+
     // ── 📦 Mark delivered from a profile's DC Closing Record (2026-10-27) ──
     reset();
     await app.openDeliveryItems('purchase', 1, 77);

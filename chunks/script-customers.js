@@ -3211,7 +3211,7 @@ const _renderDeliveryListing = async () => {
         return `<button class="btn btn-sm ${_deliveryStageFilter === key ? 'primary' : 'secondary'}" onclick="app._setDeliveryStageFilter('${key}')">${s.icon} ${s.label} (${n})</button>`;
     };
     const stageRow = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${stageTab('office')}${stageTab('collected')}${stageTab('told')}<button class="btn btn-sm secondary" style="margin-left:auto;" onclick="app.openOfficeNotices()">📷 Office photos</button></div>`;
-    const tabsHtml = stageRow + `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${tab('all', 'All', cAll)}${tab('full', 'Full Payment', cFull)}${tab('installment', 'Installment', cInst)}<button class="btn btn-sm secondary" style="margin-left:auto;" onclick="app.openAgentAdvances('owed')">🤝 Agent advances${_advN ? ` (${_advN} owed)` : ''}</button><button class="btn btn-sm secondary" onclick="app.openCancellations('requested')">❌ Cancellations</button></div>`;
+    const tabsHtml = stageRow + `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${tab('all', 'All', cAll)}${tab('full', 'Full Payment', cFull)}${tab('installment', 'Installment', cInst)}<button class="btn btn-sm secondary" style="margin-left:auto;" onclick="app.openAgentAdvances('stock')">🤝 Agent stock${_advN ? ` (${_advN} owed)` : ''}</button><button class="btn btn-sm secondary" onclick="app.openCancellations('requested')">❌ Cancellations</button></div>`;
 
     if (!rows.length) {
         const _emptyMsg = _deliveryStageFilter
@@ -3643,11 +3643,13 @@ const diHandover = async () => {
             saved++;
         }
         let lent = 0;
+        const stockWarn = fromAgent ? _diStockWarn(ids, lenderId) : '';
         if (fromAgent && saved) {
             try { lent = await _diCreateAdvances(ids, lenderId, date); }
             catch (e) { UI.toast.error('Handed over, but the agent-stock record was not saved: ' + (e?.message || e) + " — use 🤝 Agent's stock on the item"); }
         }
         UI.toast.success(`${saved} item(s) marked ${_DI_STATUS_LABEL[how].toLowerCase()}${lent ? ` · 🤝 ${lent} from agent's stock (owed back)` : ''}`);
+        if (lent && stockWarn) (UI.toast.warning || UI.toast.info)(stockWarn);
         await _diSyncOrderStatus(await _diRefresh());
     } catch (e) {
         // Nothing saved → don't leave orphan photos in storage. (A partly-saved
@@ -3668,12 +3670,35 @@ const diHandover = async () => {
 // IOU (same piece back, item for item) until the LENDER ticks "returned to me".
 // The DB refuses rings / Feng Shui and a lend before the handover.
 const _advFmt = (d) => d ? new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+// Who can hold stock: every active staff member, owner / Level 2 included (2026-11-12)
 const _advUsers = async () => {
     const all = await AppDataStore.getAll('users').catch(() => []) || [];
-    return all.filter(u => { const l = _getUserLevel(u); return l >= 3 && l <= 12 && !/inactive|deleted|resign|terminat/i.test(String(u.status || '')); })
+    return all.filter(u => { const l = _getUserLevel(u); return l >= 1 && l <= 12 && !/inactive|deleted|resign|terminat/i.test(String(u.status || '')); })
         .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
 };
 const _advUserName = (users, id) => { const u = users.find(x => String(x.id) === String(id)); return u ? (u.full_name || u.username || 'Agent') : 'Agent'; };
+const _advIsAdmin = () => _getUserLevel(_state.cu) <= 2;
+
+// 📦 My stock counts for the handover's "Whose stock?" list. Only agents the
+// viewer may see come back; a missing agent counts as 0 for admin and for the
+// viewer's own stock, otherwise unknown (null).
+const _diStockCount = (itemId, agentId) => {
+    const m = _diCtx && _diCtx.stock && _diCtx.stock.get(String(itemId));
+    if (!m) return null;
+    if (m.has(String(agentId))) return m.get(String(agentId));
+    return (_advIsAdmin() || String(agentId) === String(_state.cu?.id || '')) ? 0 : null;
+};
+const _diStockLabel = (itemId, u) => {
+    const n = itemId == null ? null : _diStockCount(itemId, u.id);
+    return escapeHtml(u.full_name || u.username || '') + (n == null ? '' : ` (${n < 0 ? '−' + Math.abs(n) : n} in hand)`);
+};
+// Lent pieces the lender's list says they don't have → one warning line
+const _diStockWarn = (itemIds, lenderId) => {
+    const short = itemIds.filter(id => { const n = _diStockCount(id, lenderId); return n != null && n <= 0; });
+    if (!short.length) return '';
+    const who = _advUserName(_diCtx.users || [], lenderId);
+    return `Not in ${who}'s stock list — add it in 🤝 Agent stock → 📦 My stock`;
+};
 
 // Eligible items + their advances, for the Items screen
 const _diLoadAdv = async (items) => {
@@ -3682,6 +3707,7 @@ const _diLoadAdv = async (items) => {
     const ids = items.map(r => r.id);
     _diCtx.eligible = new Set();
     _diCtx.adv = new Map();
+    _diCtx.stock = new Map();
     if (!ids.length || !sb) return;
     try {
         const [el, ad] = await Promise.all([
@@ -3691,6 +3717,14 @@ const _diLoadAdv = async (items) => {
         ((el && el.data) || []).forEach(x => _diCtx.eligible.add(String(typeof x === 'object' ? x.delivery_advance_eligible : x)));
         ((ad && ad.data) || []).forEach(a => _diCtx.adv.set(String(a.delivery_item_id), a));
     } catch (_) { /* no advance options */ }
+    // in-hand counts, once per item name, for items that can still be lent
+    try {
+        const open = items.filter(r => _diCtx.eligible.has(String(r.id)) && !_diCtx.adv.has(String(r.id)));
+        const names = [...new Set(open.map(r => r.item_name))];
+        const res = await Promise.all(names.map(n => sb.rpc('agent_stock_counts', { p_item: n })));
+        const byName = new Map(names.map((n, i) => [n, new Map(((res[i] && res[i].data) || []).map(c => [String(c.agent_id), Number(c.in_hand) || 0]))]));
+        open.forEach(r => _diCtx.stock.set(String(r.id), byName.get(r.item_name) || new Map()));
+    } catch (_) { /* no counts: the list shows names only */ }
     if (!_diCtx.users) _diCtx.users = await _advUsers();
 };
 
@@ -3713,6 +3747,9 @@ const _diSourceHtml = (pending) => {
     if (!_diCtx || !_diCtx.eligible || !pending.some(r => _diCtx.eligible.has(String(r.id)))) return '';
     const users = _diCtx.users || [];
     const def = String(_diCtx.saleAgentId || _state.cu?.id || '');
+    // counts only when one piece can be lent (several pieces = several products)
+    const lendable = pending.filter(r => _diCtx.eligible.has(String(r.id)));
+    const countFor = lendable.length === 1 ? lendable[0].id : null;
     return `
         <div class="form-row">
             <div class="form-group half"><label>Given from</label>
@@ -3721,7 +3758,7 @@ const _diSourceHtml = (pending) => {
                     <option value="agent">🤝 Agent's own stock (office piece goes back to the agent)</option>
                 </select></div>
             <div class="form-group half" id="di-lender-wrap" style="display:none;"><label>Whose stock?</label>
-                <select id="di-lender" class="form-control">${users.map(u => `<option value="${u.id}" ${String(u.id) === def ? 'selected' : ''}>${escapeHtml(u.full_name || u.username || '')}</option>`).join('')}</select></div>
+                <select id="di-lender" class="form-control">${users.map(u => `<option value="${u.id}" ${String(u.id) === def ? 'selected' : ''}>${_diStockLabel(countFor, u)}</option>`).join('')}</select></div>
         </div>
         <div style="font-size:11px;color:var(--gray-500);margin:-4px 0 8px;">Agent's stock is only for calligraphy, artistic masterpieces and 财库 / 财托.</div>`;
 };
@@ -3750,7 +3787,7 @@ const diMarkAdvance = async (itemId) => {
     UI.showModal('🤝 From an agent\'s own stock', `
         <p style="font-size:13px;margin:0 0 10px;"><strong>${escapeHtml(r.item_name)}</strong> was handed over on ${escapeHtml(_advFmt(r.handover_date))}. Record whose own stock it came from — the office piece goes back to them when it arrives.</p>
         <div class="form-group"><label>Whose stock?</label>
-            <select id="adv-lender" class="form-control">${users.map(u => `<option value="${u.id}" ${String(u.id) === def ? 'selected' : ''}>${escapeHtml(u.full_name || u.username || '')}</option>`).join('')}</select></div>
+            <select id="adv-lender" class="form-control">${users.map(u => `<option value="${u.id}" ${String(u.id) === def ? 'selected' : ''}>${_diStockLabel(itemId, u)}</option>`).join('')}</select></div>
         <div class="form-group"><label>Date given</label><input type="date" id="adv-date" class="form-control" value="${escapeHtml(r.handover_date || _custLocalDay())}" max="${_custLocalDay()}"></div>`,
         [{ label: 'Cancel', type: 'secondary', action: `app.openDeliveryItems('${back.kind}', ${Number(back.id)}, ${Number(back.customerId)})` },
          { label: 'Save', type: 'primary', action: `(async () => { await app.diSaveAdvance(${Number(itemId)}, '${back.kind}', ${Number(back.id)}, ${Number(back.customerId)}); })()` }]);
@@ -3760,9 +3797,11 @@ const diSaveAdvance = async (itemId, kind, id, customerId) => {
     const date = document.getElementById('adv-date')?.value;
     if (!lender) return UI.toast.error('Pick whose stock it was');
     if (!_diIsDay(date)) return UI.toast.error('Date given is required');
+    const warn = _diStockWarn([itemId], lender);
     try {
         await _diCreateAdvances([itemId], lender, date);
         UI.toast.success('Recorded — the office piece now goes back to the agent');
+        if (warn) (UI.toast.warning || UI.toast.info)(warn);
     } catch (e) {
         return UI.toast.error('Not saved: ' + (e?.message || e));
     }
@@ -3776,8 +3815,250 @@ const diAdvanceRemove = async (itemId) => {
     await _diRefresh();
 };
 
-// ── 🤝 Agent advances board ──
-let _advTab = 'owed';
+// ── 📦 My stock (owner 2026-11-12) ──
+// public.agent_stock_moves: added / taken out by hand; lent / returned / unlent
+// written by the DB when an advance is recorded, ticked returned or removed.
+// agent_stock_balance() runs as the viewer (the agent, their upline, admin).
+let _advStockAgent = '';          // admin filter: '' = everyone
+let _advStockRows = [];
+let _advProducts = null;
+let _advStockForm = null;
+let _advStockBusy = false;
+const _ADV_SUBCAT = { 'Calligraphy Adornment': 'Calligraphy', 'Artistic Masterpieces': 'Artistic Masterpieces', 'Royal Woodwork Series': '财库 / 财托' };
+const _advNum = (n) => (n < 0 ? '−' + Math.abs(n) : String(n));
+const _advKind = (kind, qty) => ({ added: '➕ Added', lent: '🤝 Given to a customer', returned: '↩ Office piece back', unlent: '↩ Not given after all' }[kind]
+    || (qty < 0 ? '➖ Taken out' : '✏️ Corrected'));
+const _advCanEdit = (agentId) => _advIsAdmin() || String(agentId) === String(_state.cu?.id || '');
+const _advStockArgs = (agentId, productId, itemName) => `${Number(agentId)}, ${productId == null ? 'null' : Number(productId)}, '${UI.escJsAttr(String(itemName || ''))}'`;
+
+const _advStockHtml = (rows, users, staff) => {
+    const isAdmin = _advIsAdmin();
+    const me = String(_state.cu?.id || '');
+    const agents = new Set(rows.map(r => String(r.agent_id)));
+    const showAgent = isAdmin || agents.size > 1 || (agents.size === 1 && !agents.has(me));
+    const filter = isAdmin ? `<select class="form-control" style="max-width:240px;font-size:13px;" aria-label="Whose stock" onchange="app.advStockFilter(this.value)">
+            <option value="">Everyone</option>${staff.map(u => `<option value="${u.id}" ${String(u.id) === String(_advStockAgent) ? 'selected' : ''}>${escapeHtml(u.full_name || u.username || '')}</option>`).join('')}</select>` : '';
+    const top = `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+            <button class="btn btn-sm primary" onclick="app.advStockAdd()">➕ Add stock</button>${filter}</div>`;
+    if (!rows.length) return top + `<div style="text-align:center;color:var(--gray-400);padding:28px;">No stock entered yet. Tap <strong>➕ Add stock</strong> to record the pieces ${isAdmin && !_advStockAgent ? 'agents hold' : 'you hold'}.</div>`;
+    // admin, everyone: one total line per product
+    let totals = '';
+    if (isAdmin && !_advStockAgent && agents.size > 1) {
+        const t = new Map();
+        rows.forEach(r => {
+            const v = t.get(r.item_name) || { inH: 0, lent: 0, holders: 0 };
+            v.inH += Number(r.in_hand) || 0; v.lent += Number(r.lent_out) || 0; if (Number(r.in_hand) > 0) v.holders++;
+            t.set(r.item_name, v);
+        });
+        totals = `<div style="font-weight:600;margin:4px 0 6px;">All agents</div><div class="prospects-table-container"><table class="prospects-table"><thead><tr>
+            <th scope="col">Product</th><th scope="col">In hand</th><th scope="col">Lent to customers</th><th scope="col">Agents holding</th></tr></thead><tbody>${[...t.entries()].map(([k, v]) => `<tr>
+            <td data-label="Product">${escapeHtml(k)}</td><td data-label="In hand"><strong>${_advNum(v.inH)}</strong></td>
+            <td data-label="Lent to customers">${v.lent || '—'}</td><td data-label="Agents holding">${v.holders} agent${v.holders === 1 ? '' : 's'} holding</td></tr>`).join('')}</tbody></table></div>
+            <div style="font-weight:600;margin:14px 0 6px;">By agent</div>`;
+    }
+    const body = rows.map(r => {
+        const inH = Number(r.in_hand) || 0, lent = Number(r.lent_out) || 0, lastQ = Number(r.last_qty) || 0;
+        const args = _advStockArgs(r.agent_id, r.product_id, r.item_name);
+        const can = _advCanEdit(r.agent_id);
+        const inCell = inH < 0
+            ? `<strong style="color:var(--error,#dc2626);">${_advNum(inH)}</strong><div style="font-size:11px;color:var(--error,#dc2626);">not entered — ➕ add it</div>`
+            : (inH === 0 ? '<span style="color:var(--gray-400);">0</span>' : `<strong>${inH}</strong>`);
+        const lentCell = lent > 0
+            ? `${lent}${r.next_back ? `<div style="font-size:11px;color:var(--gray-500);">owed back ~${escapeHtml(_advFmt(r.next_back))}</div>` : ''}`
+            : '<span style="color:var(--gray-400);">—</span>';
+        const last = r.last_date ? `${escapeHtml(_advFmt(r.last_date))} · ${escapeHtml(_advKind(r.last_kind, lastQ))} ${lastQ > 0 ? '+' : ''}${_advNum(lastQ)}` : '—';
+        const acts = (can ? `<button class="btn-sm secondary" title="Add more" aria-label="Add more" onclick="event.stopPropagation(); app.advStockAdd(${args})">➕</button>` : '')
+            + (can && inH > 0 ? `<button class="btn-sm secondary" onclick="event.stopPropagation(); app.advStockTakeOut(${args})">➖ Take out</button>` : '')
+            + `<button class="btn-sm secondary" onclick="event.stopPropagation(); app.advStockHistory(${args})">History</button>`;
+        return `<tr>
+            ${showAgent ? `<td data-label="Agent"><strong>${escapeHtml(_advUserName(users, r.agent_id))}</strong></td>` : ''}
+            <td data-label="Product">${escapeHtml(r.item_name || '')}${r.product_id == null ? '<div style="font-size:11px;color:var(--gray-500);">not in the product list</div>' : ''}</td>
+            <td data-label="In hand">${inCell}</td>
+            <td data-label="Lent to customers">${lentCell}</td>
+            <td data-label="Last change" style="font-size:12px;">${last}</td>
+            <td data-label=""><div style="display:flex;gap:4px;flex-wrap:wrap;">${acts}</div></td>
+        </tr>`;
+    }).join('');
+    return top + totals + `<div class="prospects-table-container"><table class="prospects-table"><thead><tr>
+        ${showAgent ? '<th scope="col">Agent</th>' : ''}<th scope="col">Product</th><th scope="col">In hand</th><th scope="col">Lent to customers</th>
+        <th scope="col">Last change</th><th scope="col"></th></tr></thead><tbody>${body}</tbody></table></div>`;
+};
+
+const advStockFilter = async (agentId) => {
+    _advStockAgent = agentId ? String(agentId) : '';
+    await openAgentAdvances('stock');
+};
+
+const _advLoadProducts = async () => {
+    if (_advProducts) return _advProducts;
+    const { data, error } = await _diSb().rpc('agent_stock_products');
+    if (error) throw error;
+    _advProducts = data || [];
+    return _advProducts;
+};
+
+// ➕ Add stock. From a row: that product (or, for a piece not in the product
+// list, that name) is already picked.
+const advStockAdd = async (agentId, productId, itemName) => {
+    let products;
+    try { products = await _advLoadProducts(); } catch (e) { return UI.toast.error('Could not load the product list: ' + (e?.message || e)); }
+    const isAdmin = _advIsAdmin();
+    const me = String(_state.cu?.id || '');
+    const who = String(agentId || (isAdmin && _advStockAgent) || me);
+    if (!isAdmin && who !== me) return UI.toast.error('You can only add to your own stock');
+    _advStockForm = { productless: productId == null && itemName ? String(itemName) : null };
+    const today = _custLocalDay();
+    const staff = isAdmin ? await _advUsers() : [];
+    const users = await AppDataStore.getAll('users').catch(() => []) || [];
+    const groups = Object.keys(_ADV_SUBCAT).map(sc => {
+        const ps = products.filter(p => p.subcategory === sc);
+        return ps.length ? `<optgroup label="${escapeHtml(_ADV_SUBCAT[sc])}">${ps.map(p => `<option value="${p.id}" ${String(p.id) === String(productId) ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}</optgroup>` : '';
+    }).join('');
+    const productField = _advStockForm.productless
+        ? `<div class="form-control" style="background:var(--gray-50,#fafaf9);">${escapeHtml(_advStockForm.productless)}</div>`
+        : `<select id="adv-st-product" class="form-control"><option value="">— Pick the product —</option>${groups}</select>`;
+    const whoField = isAdmin
+        ? `<select id="adv-st-agent" class="form-control">${staff.map(u => `<option value="${u.id}" ${String(u.id) === who ? 'selected' : ''}>${escapeHtml(u.full_name || u.username || '')}</option>`).join('')}</select>`
+        : `<div class="form-control" style="background:var(--gray-50,#fafaf9);">${escapeHtml(_advUserName(users, me))}</div>`;
+    UI.showModal('➕ Add stock', `
+        <div class="form-group"><label>Whose stock?</label>${whoField}</div>
+        <div class="form-group"><label>Product <span class="required">*</span></label>${productField}
+            <div style="font-size:11px;color:var(--gray-500);margin-top:4px;">Only calligraphy, artistic masterpieces and 财库 / 财托 can be agent stock.</div></div>
+        <div class="form-row">
+            <div class="form-group half"><label>How many <span class="required">*</span></label><input type="number" id="adv-st-qty" class="form-control" min="1" max="999" step="1" value="1"></div>
+            <div class="form-group half"><label>Date got it <span class="required">*</span></label><input type="date" id="adv-st-date" class="form-control" value="${today}" max="${today}"></div>
+        </div>
+        <div class="form-group"><label>Note</label><input type="text" id="adv-st-note" class="form-control" maxlength="300" placeholder="e.g. bought at the year-end promo"></div>`,
+        [{ label: 'Cancel', type: 'secondary', action: "app.openAgentAdvances('stock')" },
+         { label: 'Save', type: 'primary', action: '(async () => { await app.advStockSave(); })()' }]);
+};
+const advStockSave = async () => {
+    if (_advStockBusy || !_advStockForm) return;
+    const me = String(_state.cu?.id || '');
+    const agentId = _advIsAdmin() ? (document.getElementById('adv-st-agent')?.value || '') : me;
+    const productless = _advStockForm.productless;
+    const productId = productless ? '' : (document.getElementById('adv-st-product')?.value || '');
+    const qtyRaw = String(document.getElementById('adv-st-qty')?.value || '').trim();
+    const qty = Number(qtyRaw);
+    const date = document.getElementById('adv-st-date')?.value || '';
+    const note = (document.getElementById('adv-st-note')?.value || '').trim();
+    if (!agentId) return UI.toast.error('Pick whose stock it is');
+    if (!productless && !productId) return UI.toast.error('Pick the product');
+    if (!/^\d+$/.test(qtyRaw) || qty < 1 || qty > 999) return UI.toast.error('How many: a whole number from 1 to 999');
+    if (!_diIsDay(date)) return UI.toast.error('Date is required');
+    if (date > _custLocalDay()) return UI.toast.error('Date cannot be in the future');
+    const prod = productless ? null : (_advProducts || []).find(p => String(p.id) === String(productId));
+    const name = productless || (prod && prod.name) || '';
+    _advStockBusy = true;
+    try {
+        const { error } = await _diSb().from('agent_stock_moves').insert({
+            agent_id: Number(agentId), product_id: productId ? Number(productId) : null, item_name: name,
+            qty, kind: 'added', move_date: date, note: note || null });
+        if (error) throw error;
+    } catch (e) {
+        return UI.toast.error('Not saved: ' + (e?.message || e));
+    } finally {
+        _advStockBusy = false;
+    }
+    UI.toast.success(`Added ${qty} × ${name}`);
+    await openAgentAdvances('stock');
+};
+
+// ➖ Take out (counted wrong / damaged / given away). Pieces handed to a
+// customer come out by themselves.
+const advStockTakeOut = (agentId, productId, itemName) => {
+    const r = _advStockRows.find(x => String(x.agent_id) === String(agentId) && String(x.product_id) === String(productId)
+        && (productId != null || x.item_name === itemName));
+    const inH = r ? Number(r.in_hand) || 0 : 0;
+    if (inH <= 0) return UI.toast.error('Nothing in hand to take out');
+    if (!_advCanEdit(agentId)) return UI.toast.error('You can only change your own stock');
+    _advStockForm = { agentId: String(agentId), productId: productId == null ? null : Number(productId), itemName: String(itemName || ''), inHand: inH };
+    UI.showModal('➖ Take out of stock', `
+        <p style="font-size:13px;margin:0 0 10px;"><strong>${escapeHtml(itemName)}</strong> · ${inH} in hand</p>
+        <div class="form-row">
+            <div class="form-group half"><label>How many <span class="required">*</span></label><input type="number" id="adv-out-qty" class="form-control" min="1" max="${inH}" step="1" value="1"></div>
+            <div class="form-group half"><label>Why <span class="required">*</span></label><select id="adv-out-why" class="form-control">
+                <option value="Counted wrong">Counted wrong</option><option value="Damaged">Damaged</option><option value="Given away">Given away</option><option value="Other">Other</option></select></div>
+        </div>
+        <div class="form-group"><label>Note</label><input type="text" id="adv-out-note" class="form-control" maxlength="300" placeholder="Needed when the reason is Other"></div>
+        <div style="font-size:11px;color:var(--gray-500);">A piece handed to a customer with <strong>Given from: 🤝 Agent's own stock</strong> comes out by itself.</div>`,
+        [{ label: 'Cancel', type: 'secondary', action: "app.openAgentAdvances('stock')" },
+         { label: 'Take out', type: 'primary', action: '(async () => { await app.advStockSaveOut(); })()' }]);
+};
+const advStockSaveOut = async () => {
+    const f = _advStockForm;
+    if (_advStockBusy || !f || f.inHand == null) return;
+    const qtyRaw = String(document.getElementById('adv-out-qty')?.value || '').trim();
+    const qty = Number(qtyRaw);
+    const why = document.getElementById('adv-out-why')?.value || 'Other';
+    const note = (document.getElementById('adv-out-note')?.value || '').trim();
+    if (!/^\d+$/.test(qtyRaw) || qty < 1) return UI.toast.error('How many: a whole number, at least 1');
+    if (qty > f.inHand) return UI.toast.error(`Only ${f.inHand} in hand`);
+    if (why === 'Other' && !note) return UI.toast.error('Add a note for "Other"');
+    _advStockBusy = true;
+    try {
+        const { error } = await _diSb().from('agent_stock_moves').insert({
+            agent_id: Number(f.agentId), product_id: f.productId, item_name: f.itemName,
+            qty: -qty, kind: 'adjust', move_date: _custLocalDay(), note: note ? `${why} · ${note}` : why });
+        if (error) throw error;
+    } catch (e) {
+        return UI.toast.error('Not saved: ' + (e?.message || e));
+    } finally {
+        _advStockBusy = false;
+    }
+    UI.toast.success(`Took out ${qty} × ${f.itemName}`);
+    await openAgentAdvances('stock');
+};
+
+// History: every line for one agent + product, newest first
+const advStockHistory = async (agentId, productId, itemName) => {
+    const sb = _diSb();
+    if (!sb) return UI.toast.error('Offline — try again in a moment');
+    let rows;
+    try {
+        let q = sb.from('agent_stock_moves').select('*').eq('agent_id', agentId);
+        q = productId == null ? q.is('product_id', null) : q.eq('product_id', productId);
+        const { data, error } = await q.order('move_date', { ascending: false }).order('id', { ascending: false }).limit(300);
+        if (error) throw error;
+        rows = (data || []).filter(m => productId != null || m.item_name === itemName);
+    } catch (e) {
+        return UI.toast.error('Could not load the history: ' + (e?.message || e));
+    }
+    const users = await AppDataStore.getAll('users').catch(() => []) || [];
+    const me = String(_state.cu?.id || '');
+    const isAdmin = _advIsAdmin();
+    const args = _advStockArgs(agentId, productId, itemName);
+    const list = rows.length ? `<div class="prospects-table-container"><table class="prospects-table"><thead><tr>
+            <th scope="col">Date</th><th scope="col">Change</th><th scope="col">Pieces</th><th scope="col">Note</th><th scope="col">By</th><th scope="col"></th></tr></thead><tbody>${rows.map(m => {
+        const q = Number(m.qty) || 0;
+        const canDel = (m.kind === 'added' || m.kind === 'adjust') && (isAdmin || String(m.created_by) === me);
+        return `<tr>
+            <td data-label="Date" style="white-space:nowrap;">${escapeHtml(_advFmt(m.move_date))}</td>
+            <td data-label="Change">${escapeHtml(_advKind(m.kind, q))}</td>
+            <td data-label="Pieces" style="font-weight:600;color:${q < 0 ? 'var(--error,#dc2626)' : '#166534'};">${q > 0 ? '+' : ''}${_advNum(q)}</td>
+            <td data-label="Note">${escapeHtml(m.note || '')}</td>
+            <td data-label="By">${m.created_by ? escapeHtml(_advUserName(users, m.created_by)) : '—'}</td>
+            <td data-label="">${canDel ? `<button class="btn-sm secondary" title="Remove (typed by mistake)" aria-label="Remove" onclick="event.stopPropagation(); app.advStockDeleteMove(${Number(m.id)}, ${args})">✕</button>` : ''}</td>
+        </tr>`;
+    }).join('')}</tbody></table></div>`
+        : '<div style="text-align:center;color:var(--gray-400);padding:28px;">No changes yet.</div>';
+    UI.showModal(`📦 ${itemName}`, `
+        <div style="font-size:13px;margin-bottom:8px;">${escapeHtml(_advUserName(users, agentId))}'s stock · every change, newest first</div>
+        ${list}`,
+        [{ label: '← Back', type: 'secondary', action: "app.openAgentAdvances('stock')" }], 'fullscreen');
+    (window.app.applyMobileTableLabels || (() => {}))();
+};
+const advStockDeleteMove = async (moveId, agentId, productId, itemName) => {
+    if (!confirm('Remove this line? Only if it was typed by mistake.')) return;
+    const { data, error } = await _diSb().from('agent_stock_moves').delete().eq('id', moveId).select('id');
+    if (error) return UI.toast.error('Could not remove: ' + error.message);
+    if (!data || !data.length) return UI.toast.error('Only who typed the line (or admin) can remove it');
+    UI.toast.success('Removed');
+    await advStockHistory(agentId, productId, itemName);
+};
+
+// ── 🤝 Agent stock board ──
+let _advTab = 'stock';
 const _advOwedCount = async () => {
     try {
         const { count } = await _diSb().from('delivery_advances').select('id', { count: 'exact', head: true }).eq('status', 'owed');
@@ -3797,6 +4078,17 @@ const openAgentAdvances = async (tab) => {
         return UI.toast.error('Could not load advances: ' + (e?.message || e));
     }
     const users = await AppDataStore.getAll('users').catch(() => []) || [];
+    let stockHtml = '';
+    if (_advTab === 'stock') {
+        try {
+            const { data, error } = await sb.rpc('agent_stock_balance', { p_agent: _advStockAgent ? Number(_advStockAgent) : null });
+            if (error) throw error;
+            _advStockRows = data || [];
+        } catch (e) {
+            return UI.toast.error('Could not load stock: ' + (e?.message || e));
+        }
+        stockHtml = _advStockHtml(_advStockRows, users, _advIsAdmin() ? await _advUsers() : []);
+    }
     const today = _custLocalDay();
     const me = String(_state.cu?.id || '');
     const isAdmin = _getUserLevel(_state.cu) <= 2;
@@ -3804,8 +4096,8 @@ const openAgentAdvances = async (tab) => {
     const due = owed.filter(a => a.expected_back && a.expected_back <= today);
     const shown = _advTab === 'returned' ? rows.filter(a => a.status === 'returned').reverse()
         : _advTab === 'due' ? due : owed;
-    const tabBtn = (t, label, n) => `<button class="btn btn-sm ${_advTab === t ? 'primary' : 'secondary'}" onclick="app.openAgentAdvances('${t}')">${label} (${n})</button>`;
-    const list = shown.length ? `<div class="prospects-table-container"><table class="prospects-table"><thead><tr>
+    const tabBtn = (t, label, n) => `<button class="btn btn-sm ${_advTab === t ? 'primary' : 'secondary'}" onclick="app.openAgentAdvances('${t}')">${label}${n == null ? '' : ` (${n})`}</button>`;
+    const list = _advTab === 'stock' ? stockHtml : shown.length ? `<div class="prospects-table-container"><table class="prospects-table"><thead><tr>
             <th scope="col">Agent (lender)</th><th scope="col">Item</th><th scope="col">Customer</th><th scope="col">Given</th>
             <th scope="col">Office piece due</th><th scope="col">Status</th><th scope="col"></th></tr></thead><tbody>${shown.map(a => {
         const late = a.status === 'owed' && a.expected_back && a.expected_back < today;
@@ -3827,11 +4119,14 @@ const openAgentAdvances = async (tab) => {
         </tr>`;
     }).join('')}</tbody></table></div>`
         : `<div style="text-align:center;color:var(--gray-400);padding:28px;">${_advTab === 'returned' ? 'Nothing returned yet.' : 'No stock owed to agents. 🎉'}</div>`;
-    UI.showModal('🤝 Agent stock advances', `
+    const foot = _advTab === 'stock'
+        ? `<strong>In hand</strong> goes down by itself when a piece is handed to a customer with <strong>Given from: 🤝 Agent's own stock</strong>, and back up when the agent ticks <strong>↩ Returned to me</strong>. Use <strong>➖ Take out</strong> only for a wrong count, a damaged piece or a gift.`
+        : `The agent ticks <strong>↩ Returned to me</strong> when the office piece is back in their hands. To record an advance that happened earlier: open the order's <strong>Items</strong> and tap <strong>🤝 Agent's stock</strong> on the handed-over piece.`;
+    UI.showModal('🤝 Agent stock', `
         <div style="font-size:13px;margin-bottom:8px;"><strong>${owed.length}</strong> piece${owed.length === 1 ? '' : 's'} owed back to agents${due.length ? ` · <span style="color:#b91c1c;font-weight:600;">${due.length} due now</span>` : ''}</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${tabBtn('owed', 'Owed', owed.length)}${tabBtn('due', 'Due back', due.length)}${tabBtn('returned', 'Returned', rows.length - owed.length)}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${tabBtn('stock', '📦 My stock', null)}${tabBtn('owed', 'Owed', owed.length)}${tabBtn('due', 'Due back', due.length)}${tabBtn('returned', 'Returned', rows.length - owed.length)}</div>
         ${list}
-        <div style="margin-top:10px;font-size:12px;color:var(--gray-500);">The agent ticks <strong>↩ Returned to me</strong> when the office piece is back in their hands. To record an advance that happened earlier: open the order's <strong>Items</strong> and tap <strong>🤝 Agent's stock</strong> on the handed-over piece.</div>`,
+        <div style="margin-top:10px;font-size:12px;color:var(--gray-500);">${foot}</div>`,
         [{ label: '← Back to list', type: 'secondary', action: 'app.openDeliveryListing()' }], 'fullscreen');
     (window.app.applyMobileTableLabels || (() => {}))();
 };
@@ -4576,6 +4871,13 @@ const _setDeliveryStageFilter = async (f) => {
         openAgentAdvances,
         advReturn,
         advSaveReturn,
+        advStockFilter,
+        advStockAdd,
+        advStockSave,
+        advStockTakeOut,
+        advStockSaveOut,
+        advStockHistory,
+        advStockDeleteMove,
         diSaveField,
         diAddItem,
         diSplitItem,
