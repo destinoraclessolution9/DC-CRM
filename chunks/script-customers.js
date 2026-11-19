@@ -3196,6 +3196,7 @@ const _renderDeliveryListing = async () => {
     // Sort: pending first, dispatched next, delivered last; then by name.
     const order = { 'Pending Delivery': 0, 'Dispatched': 1, 'Delivered': 2 };
     rows.sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.name.localeCompare(b.name));
+    const _pdCounts = await _pdCountsFor(rows.filter(l => l.inst));
 
     // Payment-type filter tabs (counts reflect the delivered toggle but not the tab).
     const _afterDelivered = lines.filter(l => _deliveryShowDelivered || l.status !== 'Delivered');
@@ -3247,6 +3248,11 @@ const _renderDeliveryListing = async () => {
             : (l.kind === 'purchase'
                 ? `<button class="btn-sm secondary" onclick="app.uploadPaymentProof(${l.id}, ${l.customerId})"><i class="fas fa-upload"></i> Upload</button>`
                 : '<span style="color:var(--gray-400);">—</span>');
+        // 📎 up to 50 payment receipts / photos / PDFs per installment sale
+        const _pdN = _pdCounts.get(_pdKind(l.kind) + ':' + l.id) || 0;
+        const docsBtn = l.inst
+            ? `<button type="button" class="btn-sm secondary" style="margin-top:4px;white-space:nowrap;${_pdN ? 'border-color:var(--primary);color:var(--primary);' : ''}" title="Payment receipts, photos and PDFs (up to 50)" onclick="event.stopPropagation(); app.openPaymentDocs('${_pdKind(l.kind)}', ${l.id}, ${l.customerId})"><i class="fas fa-paperclip"></i> Docs ${_pdN}/${_PD_MAX}</button>`
+            : '';
         // Ring-size sub-line under the product, red when a Power Ring is missing it.
         const isPR = _isPowerRingName(l.product);
         const ringHtml = isPR
@@ -3273,7 +3279,7 @@ const _renderDeliveryListing = async () => {
             <td>${prodBadge}</td>
             <td>${statusSel}<button class="btn-sm secondary" style="margin-top:4px;white-space:nowrap;" title="Items, handover date and photo proof" onclick="event.stopPropagation(); app.openDeliveryItems('${l.kind}', ${l.id}, ${l.customerId})"><i class="fas fa-box"></i> Items ${l.diDone}/${l.diTotal}</button></td>
             <td><input type="text" class="form-control" style="font-size:12px;padding:4px 6px;min-width:140px;" value="${escapeHtml(l.remarks)}" placeholder="Add remark…" onchange="app.saveDeliveryRemarks('${l.kind}', ${l.id}, ${l.customerId}, this.value)"></td>
-            <td>${proofCell}</td>
+            <td>${proofCell}${docsBtn ? '<br>' + docsBtn : ''}</td>
         </tr>`;
     });
     html += `</tbody></table></div><div style="margin-top:10px;font-size:12px;color:var(--gray-500);">${rows.length} line${rows.length !== 1 ? 's' : ''} shown</div>`;
@@ -4838,8 +4844,225 @@ const _setDeliveryStageFilter = async (f) => {
 };
 
 
+// ── 📎 Payment documents — up to 50 files per installment sale (owner 2026-11-19) ──
+// Installment plans lapse; the customer then banks in and the receipt must be kept.
+// One pool per sale (purchase_documents, ref_kind purchase|conversion). The 50-file
+// cap is also enforced by a DB trigger. A file can double as a POP lapse receipt.
+const _PD_MAX = 50;
+const _PD_PX = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+const _PD_ACCEPT = 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv';
+let _pdCtx = null;      // { kind, id, customerId }
+let _pdDocs = new Map(); // doc id → row (for open / delete)
+let _pdBusy = false;
+const _pdKind = (k) => (k === 'purchase' ? 'purchase' : 'conversion');
+
+// n docs per sale for the listing's rows (one query per kind; failures just show 0)
+const _pdCountsFor = async (lines) => {
+    const out = new Map();
+    const sb = _diSb();
+    if (!sb) return out;
+    for (const kind of ['purchase', 'conversion']) {
+        const ids = [...new Set(lines.filter(l => _pdKind(l.kind) === kind).map(l => Number(l.id)))];
+        if (!ids.length) continue;
+        try {
+            const { data, error } = await sb.from('purchase_documents').select('ref_id').eq('ref_kind', kind).in('ref_id', ids).limit(5000);
+            if (error) continue;
+            (data || []).forEach(r => { const k = kind + ':' + r.ref_id; out.set(k, (out.get(k) || 0) + 1); });
+        } catch (_) { /* table absent / offline — show 0 */ }
+    }
+    return out;
+};
+
+const _pdUserNames = new Map();
+const _pdUserName = async (uid) => {
+    if (!uid) return '';
+    const k = String(uid);
+    if (_pdUserNames.has(k)) return _pdUserNames.get(k);
+    let n = '';
+    try { const u = await AppDataStore.getById('users', uid); n = u?.full_name || u?.name || u?.email || ''; } catch (_) { /* leave blank */ }
+    _pdUserNames.set(k, n);
+    return n;
+};
+
+const _pdSize = (b) => {
+    b = Number(b) || 0;
+    return b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : b >= 1024 ? Math.round(b / 1024) + ' KB' : b ? b + ' B' : '';
+};
+
+const _pdRow = (d, used, who, me, isAdmin) => {
+    const isImg = /^image\//.test(d.mime || '') || /\.(jpe?g|png|gif|webp|heic)$/i.test(d.file_name || d.file_path || '');
+    const isPdf = /pdf/i.test(d.mime || '') || /\.pdf$/i.test(d.file_name || d.file_path || '');
+    const thumb = isImg
+        ? `<img loading="lazy" data-attach-src="${escapeHtml(String(d.file_path))}" src="${_PD_PX}" alt="" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--gray-200);flex:none;">`
+        : `<div style="width:46px;height:46px;border-radius:6px;border:1px solid var(--gray-200);display:flex;align-items:center;justify-content:center;font-size:20px;color:${isPdf ? '#b91c1c' : 'var(--gray-500)'};flex:none;"><i class="fas ${isPdf ? 'fa-file-pdf' : 'fa-file-alt'}"></i></div>`;
+    const when = d.created_at ? new Date(d.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+    const canDel = isAdmin || String(d.uploaded_by) === me;
+    return `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--gray-100);">
+        ${thumb}
+        <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(d.file_name || 'file')}</div>
+            <div style="font-size:11px;color:var(--gray-500);">${escapeHtml([when, who, _pdSize(d.size_bytes)].filter(Boolean).join(' · '))}${used ? ' · <span style="color:#166534;font-weight:600;">🧾 used as POP receipt</span>' : ''}</div>
+            <input type="text" class="form-control" style="font-size:12px;padding:3px 6px;margin-top:3px;" value="${escapeHtml(d.note || '')}" placeholder="Add note…" onchange="app.pdSaveNote(${Number(d.id)}, this.value)">
+        </div>
+        <div style="display:flex;gap:4px;flex:none;">
+            <button type="button" class="btn-sm secondary" onclick="event.stopPropagation();app.pdOpen(${Number(d.id)})"><i class="fas fa-eye"></i> View</button>
+            ${canDel ? `<button type="button" class="btn-sm secondary" title="Delete" onclick="event.stopPropagation();app.pdDelete(${Number(d.id)})"><i class="fas fa-trash"></i></button>` : ''}
+        </div>
+    </div>`;
+};
+
+const openPaymentDocs = async (kind, id, customerId) => {
+    const sb = _diSb();
+    if (!sb) return UI.toast.error('Offline — cannot open documents right now');
+    kind = _pdKind(kind);
+    id = Number(id);
+    _pdCtx = { kind, id, customerId: Number(customerId) };
+    let docs = [];
+    let used = new Set();
+    let title = '';
+    let hasPlan = false;
+    try {
+        const { data, error } = await sb.from('purchase_documents').select('*').eq('ref_kind', kind).eq('ref_id', id).order('created_at', { ascending: false });
+        if (error) throw error;
+        docs = data || [];
+    } catch (e) {
+        return UI.toast.error('Could not load documents: ' + (e?.message || e));
+    }
+    try {
+        if (docs.length) {
+            const { data: rc } = await sb.from('pop_receipts').select('file_path').in('file_path', docs.map(d => d.file_path));
+            used = new Set((rc || []).map(r => r.file_path));
+        }
+        if (kind === 'purchase') {
+            const { count } = await sb.from('pop_installments').select('id', { count: 'exact', head: true }).eq('purchase_id', id);
+            hasPlan = (count || 0) > 0;
+        }
+        const info = await _diOrderInfo(kind, id, customerId);
+        title = `${info.name || ''}${info.invoice ? ' · ' + info.invoice : ''}${info.item ? ' · ' + String(info.item).slice(0, 60) : ''}`;
+    } catch (_) { /* title/badges are optional */ }
+    _pdDocs = new Map(docs.map(d => [Number(d.id), d]));
+    const me = String(_state.cu?.id || '');
+    const isAdmin = isSystemAdmin();
+    const names = {};
+    for (const uid of [...new Set(docs.map(d => d.uploaded_by).filter(Boolean))]) names[uid] = await _pdUserName(uid);
+    const n = docs.length;
+    const full = n >= _PD_MAX;
+    const body = `
+        <div style="font-size:13px;margin-bottom:8px;">${title ? `<strong>${escapeHtml(title)}</strong><br>` : ''}<span style="color:var(--gray-600);">Receipts, photos and PDFs for this instalment plan — keep every manual bank-in here.</span></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+            <div style="flex:1;height:8px;border-radius:4px;background:var(--gray-100);overflow:hidden;"><div style="height:100%;width:${Math.min(100, Math.round(n / _PD_MAX * 100))}%;background:${full ? '#b91c1c' : 'var(--primary)'};"></div></div>
+            <strong style="font-size:13px;white-space:nowrap;">${n} / ${_PD_MAX}</strong>
+        </div>
+        <div class="form-group" style="margin-bottom:8px;">
+            <input type="file" id="pd-files" class="form-control" multiple accept="${_PD_ACCEPT}" ${full ? 'disabled' : ''}>
+            <input type="text" id="pd-note" class="form-control" style="margin-top:6px;" placeholder="Note for these files (optional), e.g. Aug + Sep, RM 600 incl. late fee" ${full ? 'disabled' : ''}>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:6px;">
+                <button type="button" class="btn primary btn-sm" id="pd-upload-btn" onclick="app.pdUpload()" ${full ? 'disabled' : ''}><i class="fas fa-upload"></i> Upload</button>
+                <span id="pd-status" style="font-size:12px;color:var(--primary);"></span>
+            </div>
+            <div style="color:var(--gray-500);font-size:11px;margin-top:4px;">${full ? 'This sale has reached the 50-file limit — delete a file to add more.' : 'Photos, PDF, Word or Excel · up to 5 MB each · select many at once.'}</div>
+        </div>
+        ${n ? docs.map(d => _pdRow(d, used.has(d.file_path), names[d.uploaded_by] || '', me, isAdmin)).join('') : '<div style="text-align:center;color:var(--gray-400);padding:22px;">No documents yet.</div>'}`;
+    UI.showModal('📎 Payment documents', body, [
+        { label: '← Back to list', type: 'secondary', action: 'app.openDeliveryListing()' },
+        ...(hasPlan ? [{ label: '💳 POP plan', type: 'secondary', action: `app.openPopPlan(${id})` }] : []),
+    ]);
+    (window.app.applyMobileTableLabels || (() => {}))();
+};
+
+const pdUpload = async () => {
+    if (_pdBusy || !_pdCtx) return;
+    const sb = _diSb();
+    if (!sb) return UI.toast.error('Offline — cannot upload right now');
+    let files = [...(document.getElementById('pd-files')?.files || [])];
+    if (!files.length) return UI.toast.error('Choose one or more files first');
+    const note = (document.getElementById('pd-note')?.value || '').trim();
+    const { kind, id, customerId } = _pdCtx;
+    _pdBusy = true;
+    const status = document.getElementById('pd-status');
+    const btn = document.getElementById('pd-upload-btn');
+    if (btn) btn.disabled = true;
+    let ok = 0;
+    const failed = [];
+    let skipped = 0;
+    try {
+        const { count } = await sb.from('purchase_documents').select('id', { count: 'exact', head: true }).eq('ref_kind', kind).eq('ref_id', id);
+        const room = _PD_MAX - (count || 0);
+        if (room <= 0) { UI.toast.error('This sale already has 50 documents — delete one first'); return; }
+        if (files.length > room) { skipped = files.length - room; files = files.slice(0, room); }
+        if (files.some(f => /^image\//.test(f.type)) && !window.app.compressImageFile && typeof window._loadChunk === 'function') {
+            try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* raw file fallback */ }
+        }
+        const compress = window.app.compressImageFile || (f => Promise.resolve(f));
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            let path = null;
+            if (status) status.textContent = `Uploading ${i + 1}/${files.length}…`;
+            try {
+                const f = /^image\//.test(file.type) ? await compress(file) : file;
+                if (f.size > 5 * 1024 * 1024) throw new Error('over 5 MB');
+                const safe = String(file.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80);
+                path = `purchase-docs/${kind}/${id}/${Date.now()}_${i}_${safe}`;
+                const { error: upErr } = await sb.storage.from('attachments').upload(path, f, { upsert: false, contentType: f.type || 'application/octet-stream' });
+                if (upErr) throw upErr;
+                const { error: insErr } = await sb.from('purchase_documents').insert({
+                    ref_kind: kind, ref_id: id, customer_id: customerId || null,
+                    file_path: path, file_name: file.name || 'file', mime: f.type || null, size_bytes: f.size || null, note: note || null,
+                });
+                if (insErr) throw insErr;
+                ok++;
+            } catch (e) {
+                if (path) { try { await sb.storage.from('attachments').remove([path]); } catch (_) { /* best-effort */ } }
+                failed.push(`${file.name}: ${e?.message || e}`);
+            }
+        }
+    } finally {
+        _pdBusy = false;
+    }
+    if (ok) UI.toast.success(`${ok} file${ok === 1 ? '' : 's'} added`);
+    if (failed.length) UI.toast.error(`Not saved — ${failed.slice(0, 2).join('; ')}${failed.length > 2 ? ` (+${failed.length - 2} more)` : ''}`);
+    if (skipped) UI.toast.warning ? UI.toast.warning(`${skipped} file${skipped === 1 ? '' : 's'} skipped — 50-file limit`) : UI.toast.error(`${skipped} skipped — 50-file limit`);
+    await openPaymentDocs(kind, id, customerId);
+};
+
+const pdOpen = (docId) => {
+    const d = _pdDocs.get(Number(docId));
+    if (d && window._openAttachment) window._openAttachment(d.file_path);
+    else UI.toast.error('File not found');
+};
+
+const pdSaveNote = async (docId, value) => {
+    try {
+        const { data, error } = await _diSb().from('purchase_documents').update({ note: String(value || '').trim() || null }).eq('id', Number(docId)).select('id');
+        if (error) throw error;
+        if (!data || !data.length) throw new Error('Not allowed');
+        UI.toast.success('Note saved');
+    } catch (e) { UI.toast.error('Could not save note: ' + (e?.message || e)); }
+};
+
+const pdDelete = async (docId) => {
+    const d = _pdDocs.get(Number(docId));
+    const sb = _diSb();
+    if (!d || !sb || !_pdCtx) return;
+    if (!window.confirm(`Delete "${d.file_name || 'this file'}"? This cannot be undone.`)) return;
+    try {
+        const { data, error } = await sb.from('purchase_documents').delete().eq('id', Number(docId)).select('id');
+        if (error) throw error;
+        if (!data || !data.length) throw new Error('Only the person who uploaded it (or admin) can delete');
+        // keep the storage object if a POP receipt (or another row) still points at it
+        const [{ count: rc }, { count: dc }] = await Promise.all([
+            sb.from('pop_receipts').select('id', { count: 'exact', head: true }).eq('file_path', d.file_path),
+            sb.from('purchase_documents').select('id', { count: 'exact', head: true }).eq('file_path', d.file_path),
+        ]);
+        if (!rc && !dc) await AppDataStore.deleteAttachmentByPath(d.file_path);
+        UI.toast.success('Deleted');
+    } catch (e) { return UI.toast.error('Could not delete: ' + (e?.message || e)); }
+    await openPaymentDocs(_pdCtx.kind, _pdCtx.id, _pdCtx.customerId);
+};
+
     app.register('customers', {
         openOfficeNotices,
+        openPaymentDocs, pdUpload, pdOpen, pdSaveNote, pdDelete,
         openOfficeNotice,
         ofnUpload,
         ofnConfirm,

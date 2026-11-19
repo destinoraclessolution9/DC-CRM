@@ -762,6 +762,12 @@
         if (!rows.length) return UI.toast.info('No lapsed months on this plan');
         const focus = rows.some(r => String(r.id) === String(focusId)) ? String(focusId) : String(rows[0].id);
         const sum = rows.filter(r => String(r.id) === focus).reduce((t, r) => t + (Number(r.amount) || 0), 0);
+        // files already uploaded for this sale in 📎 Payment documents (Product Delivery Listing)
+        let docs = [];
+        try {
+            const { data } = await sb.from('purchase_documents').select('id,file_path,file_name,created_at').eq('ref_kind', 'purchase').eq('ref_id', purchaseId).order('created_at', { ascending: false }).limit(50);
+            docs = data || [];
+        } catch (_) { /* optional */ }
         UI.showModal('💵 Paid manually (bank-in receipt)', `
             <div style="font-size:13px;margin-bottom:6px;">Which lapsed month(s) does this receipt pay?</div>
             ${rows.map(r => `<label style="display:flex;gap:8px;align-items:center;padding:4px 0;"><input type="checkbox" class="pop-pay-pick" value="${Number(r.id)}" data-amt="${Number(r.amount) || 0}" ${String(r.id) === focus ? 'checked' : ''}
@@ -771,7 +777,9 @@
                 <div class="form-group half"><label>Amount paid (RM) <span class="required">*</span></label><input type="number" step="0.01" min="0" id="pop-pay-amt" class="form-control" value="${sum.toFixed(2)}"></div>
                 <div class="form-group half"><label>Date paid <span class="required">*</span></label><input type="date" id="pop-pay-date" class="form-control" value="${_today()}" max="${_today()}"></div>
             </div>
-            <div class="form-group"><label>Receipt (photo or PDF) <span class="required">*</span></label><input type="file" id="pop-pay-file" class="form-control" accept="image/*,application/pdf"></div>
+            <div class="form-group"><label>Receipt (photo or PDF) <span class="required">*</span></label><input type="file" id="pop-pay-file" class="form-control" accept="image/*,application/pdf">
+                ${docs.length ? `<div style="font-size:12px;color:var(--gray-500);margin:6px 0 3px;">…or use a file already uploaded for this sale (📎 Payment documents)</div>
+                <select id="pop-pay-doc" class="form-control" onchange="var f=document.getElementById('pop-pay-file');if(this.value&&f)f.value='';"><option value="">— choose uploaded file —</option>${docs.map(d => `<option value="${esc(d.file_path)}" data-name="${esc(d.file_name || '')}">${esc(d.file_name || 'file')}</option>`).join('')}</select>` : ''}</div>
             <div class="form-row">
                 <div class="form-group half"><label>Bank ref</label><input type="text" id="pop-pay-ref" class="form-control" placeholder="optional"></div>
                 <div class="form-group half"><label>Note</label><input type="text" id="pop-pay-note" class="form-control" placeholder="e.g. incl. RM50 late fee"></div>
@@ -788,16 +796,23 @@
         const amount = Number(document.getElementById('pop-pay-amt')?.value);
         const date = document.getElementById('pop-pay-date')?.value || '';
         const file = (document.getElementById('pop-pay-file')?.files || [])[0];
+        const docSel = document.getElementById('pop-pay-doc');
+        const docPath = (!file && docSel && docSel.value) ? docSel.value : '';
+        const docName = docPath ? (docSel.options[docSel.selectedIndex].getAttribute('data-name') || '') : '';
         const ref = (document.getElementById('pop-pay-ref')?.value || '').trim();
         const note = (document.getElementById('pop-pay-note')?.value || '').trim();
         if (!ids.length) return UI.toast.error('Tick the month(s) this receipt pays');
         if (!(amount > 0)) return UI.toast.error('Enter the amount paid');
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > _today()) return UI.toast.error('Enter the date paid (not in the future)');
-        if (!file) return UI.toast.error('Attach the receipt (photo or PDF)');
+        if (!file && !docPath) return UI.toast.error('Attach the receipt (photo or PDF), or choose an uploaded file');
         _popPayBusy = true;
         const status = document.getElementById('pop-pay-status');
         let path = null;
+        let fresh = false;   // true only when THIS save uploaded the file (so a failure may remove it)
         try {
+          if (docPath) {
+            path = docPath;
+          } else {
             let f = file;
             if (/^image\//.test(file.type)) {
                 if (!app.compressImageFile && typeof window._loadChunk === 'function') { try { await window._loadChunk('chunks/script-prospects.min.js'); } catch (_) { /* raw file */ } }
@@ -808,11 +823,18 @@
             path = `pop/receipts/${purchaseId}/${Date.now()}_${String(f.name || 'receipt').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
             const { error: upErr } = await sb.storage.from('attachments').upload(path, f, { upsert: false, contentType: f.type || 'application/octet-stream' });
             if (upErr) throw upErr;
-            const { error } = await sb.rpc('pop_record_receipt', { p_inst_ids: ids, p_paid_date: date, p_amount: amount, p_file_path: path, p_file_name: file.name || null, p_bank_ref: ref || null, p_note: note || null });
+            fresh = true;
+          }
+            const { error } = await sb.rpc('pop_record_receipt', { p_inst_ids: ids, p_paid_date: date, p_amount: amount, p_file_path: path, p_file_name: (file && file.name) || docName || null, p_bank_ref: ref || null, p_note: note || null });
             if (error) throw error;
+            fresh = false;
+            // a newly uploaded receipt also joins the sale's 📎 Payment documents pool (best-effort; 50-file cap)
+            if (file) {
+                try { await sb.from('purchase_documents').insert({ ref_kind: 'purchase', ref_id: Number(purchaseId), file_path: path, file_name: file.name || 'receipt', mime: file.type || null, size_bytes: file.size || null, note: 'POP receipt' + (note ? ' — ' + note : '') }); } catch (_) { /* pool is optional */ }
+            }
             UI.toast.success(`Receipt saved — ${ids.length} month${ids.length === 1 ? '' : 's'} paid manually`);
         } catch (e) {
-            if (path) { try { await sb.storage.from('attachments').remove([path]); } catch (_) { /* best-effort */ } }
+            if (path && fresh) { try { await sb.storage.from('attachments').remove([path]); } catch (_) { /* best-effort */ } }
             if (status) status.textContent = '';
             _popPayBusy = false;
             return UI.toast.error('Not saved: ' + (e && e.message ? e.message : e));
